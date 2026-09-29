@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the article below."
+title: "GeoShift: Cross-Domain Foundation Models for Electrostatics"
+version: 1.0.0
+license: MIT
+repository-code: "https://github.com/kroy3/geoshift"
+authors:
+  - family-names: Roy
+    given-names: Kushal Raj
+preferred-citation:
+  type: article
+  title: "Cross-Domain Foundation Models for Electrostatics: Pre-training Neural Operators Across Molecular Physics"
+  authors:
+    - family-names: Roy
+      given-names: Kushal Raj
+  journal: "APL Computational Physics"
+  year: 2025

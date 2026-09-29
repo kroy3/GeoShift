@@ -1,529 +1,225 @@
-# GeoShift:Cross-Domain Foundation Models for Electrostatics
+# GeoShift: Cross-Domain Foundation Models for Electrostatics
 
-<div align="center">
+[![CI](https://github.com/kroy3/geoshift/actions/workflows/ci.yml/badge.svg)](https://github.com/kroy3/geoshift/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![Architecture](docs/images/architecture.svg)
+Code accompanying the paper
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Paper](https://img.shields.io/badge/Paper-APL%20Comp.%20Phys.-blue)](docs/manuscript.pdf)
+> K. R. Roy, *Cross-Domain Foundation Models for Electrostatics: Pre-training
+> Neural Operators Across Molecular Physics*, APL Computational Physics (2025).
 
-**Pre-training neural operators across molecular physics domains for improved sample efficiency and transferability**
+GeoShift pre-trains an E(3)-equivariant graph neural network jointly on
+several molecular datasets (QM9, MD17 and ANI-1x) and transfers it to new
+molecular geometries and chemical spaces. This repository contains the model,
+the training and evaluation pipeline, and the configurations used in the
+paper.
 
-[Key Features](#-key-features) •
-[Installation](#-installation) •
-[Quick Start](#-quick-start) •
-[Results](#-results) •
-[Citation](#-citation)
+## Contents
 
-</div>
+- [Installation](#installation)
+- [Quick check](#quick-check)
+- [Datasets](#datasets)
+- [Reproducing the experiments](#reproducing-the-experiments)
+- [Model](#model)
+- [Configuration](#configuration)
+- [Repository layout](#repository-layout)
+- [Citation](#citation)
 
----
+## Installation
 
-## 🎯 Overview
-
-This repository implements a **hybrid EGNN-PaiNN architecture** for cross-domain learning in molecular property prediction. By pre-training across multiple physics domains (quantum mechanics, molecular dynamics, ANI-1x), we achieve:
-
-- **30-44% error reduction** on geometry transfer tasks
-- **5× sample efficiency** improvement over training from scratch
-- **Physics-compliant predictions** across diverse molecular systems
-
-### The Problem
-
-Training neural operators for molecular property prediction typically requires:
-- Large domain-specific datasets
-- Expensive quantum chemistry calculations  
-- Poor transfer across molecular geometries and compositions
-
-### Our Solution
-
-**Cross-domain pre-training** leverages shared electrostatic principles across:
-- QM9 (small molecules, equilibrium geometries)
-- MD17 (non-equilibrium dynamics)
-- ANI-1x (diverse conformations)
-
-The model learns **equation-class-specific** representations that transfer effectively to new geometries and chemical spaces.
-
----
-
-## 📊 Architecture
-
-![Model Architecture](docs/images/model_architecture.svg)
-
-### Hybrid EGNN-PaiNN Design
-
-```
-Input: Molecular Graph
-  ↓
-┌─────────────────────────────────┐
-│  Equivariant Message Passing    │  ← EGNN Layers
-│  (Geometric Features)            │
-└─────────────────────────────────┘
-  ↓
-┌─────────────────────────────────┐
-│  Equivariant Convolutions        │  ← PaiNN Layers
-│  (Physical Interactions)         │
-└─────────────────────────────────┘
-  ↓
-┌─────────────────────────────────┐
-│  Multi-Task Prediction Head      │
-│  • Energy                        │
-│  • HOMO-LUMO Gap                 │
-│  • Forces (optional)             │
-└─────────────────────────────────┘
-```
-
-**Key Components:**
-- **EGNN Layers:** Capture geometric relationships with SE(3) equivariance
-- **PaiNN Layers:** Model physical interactions with message passing
-- **Multi-Task Head:** Unified prediction across properties
-- **Physics Constraints:** Energy conservation, force consistency
-
----
-
-## 🚀 Key Features
-
-- ✅ **Hybrid Architecture** - EGNN-PaiNN fusion for geometric and physical features
-- ✅ **Cross-Domain Learning** - Pre-training across QM9, MD17, ANI-1x datasets
-- ✅ **GeoShift Benchmark** - 5 geometry transfer evaluation tasks
-- ✅ **Physics-Augmented Training** - Energy conservation and force matching constraints
-- ✅ **Efficient Implementation** - Optimized PyTorch with automatic mixed precision
-- ✅ **Comprehensive Evaluation** - Beyond MSE: force MAE, energy RMSE, physics compliance
-
----
-
-## 📈 Results
-
-![Training Curves](docs/images/training_curves.svg)
-
-### Geometry Transfer Performance (GeoShift Benchmark)
-
-| Task | From → To | Baseline MAE | Our MAE | Improvement |
-|------|-----------|--------------|---------|-------------|
-| **Task 1** | Small → Large | 0.087 eV | 0.051 eV | **41%** ↓ |
-| **Task 2** | Organic → Inorganic | 0.112 eV | 0.073 eV | **35%** ↓ |
-| **Task 3** | Equilibrium → MD | 0.095 eV | 0.056 eV | **41%** ↓ |
-| **Task 4** | Gas → Condensed | 0.128 eV | 0.083 eV | **35%** ↓ |
-| **Task 5** | Rigid → Flexible | 0.104 eV | 0.073 eV | **30%** ↓ |
-
-### Sample Efficiency
-
-![Sample Efficiency](docs/images/sample_efficiency.svg)
-
-Pre-trained model achieves target accuracy with **5× fewer samples** than training from scratch.
-
-### Physics Compliance
-
-- ✅ Energy conservation: <0.1% deviation
-- ✅ Force consistency: MAE < 0.05 kcal/mol/Å
-- ✅ Rotational equivariance: Perfect within numerical precision
-
----
-
-## 💻 Installation
-
-### Requirements
-
-- Python 3.8+
-- PyTorch 2.0+
-- CUDA 11.8+ (for GPU training)
-
-### Setup
+Python 3.9 or newer is required. Install PyTorch for your platform first
+(see [pytorch.org](https://pytorch.org/get-started/locally/)), then:
 
 ```bash
-# Clone repository
-git clone https://github.com/YOUR_USERNAME/molecular-foundation-models.git
-cd molecular-foundation-models
-
-# Create conda environment
-conda create -n molecular-models python=3.10
-conda activate molecular-models
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install package (editable mode for development)
-pip install -e .
+git clone https://github.com/kroy3/geoshift.git
+cd geoshift
+pip install -e ".[analysis]"      # add ",dev" to run the test suite
 ```
 
-### Verify Installation
+No compiled PyTorch Geometric extensions (`torch-scatter`, `torch-cluster`,
+...) are needed.
 
-```python
-import torch
-from src.model import build_model
+## Quick check
 
-# Create model
-config = {
-    "model": {
-        "hidden_dim": 128,
-        "n_layers": 5,
-        "cutoff": 5.0
-    }
-}
-model = build_model(config)
-print(f"Model created with {sum(p.numel() for p in model.parameters()):,} parameters")
-```
-
----
-
-## 🏃 Quick Start
-
-### 1. Download Datasets
+The smoke-test configuration trains a small model for three epochs on a
+synthetic dataset and exercises the full pipeline (data, training,
+checkpointing, evaluation) in under a minute on a CPU:
 
 ```bash
-# Download QM9, MD17, and ANI-1x datasets (~23 GB)
-python scripts/download_datasets.py
-
-# Datasets will be cached in data/ directory
+geoshift-train --config configs/smoke_test.json
+pytest                                # requires the "dev" extra
 ```
 
-### 2. Train Cross-Domain Model
+## Datasets
+
+| Dataset | Content | Units in files | How to obtain |
+|---|---|---|---|
+| QM9 | ~134k small organic molecules at equilibrium (DFT) | eV | automatic |
+| MD17 / rMD17 | MD trajectories of small molecules with energies and forces | kcal/mol, kcal/mol/Å | automatic |
+| ANI-1x | ~5M off-equilibrium conformations, ωB97x/6-31G(d) energies and forces | Hartree, Hartree/Å | manual |
+
+All quantities are converted to eV and eV/Å on loading. QM9 and (r)MD17 are
+downloaded through PyTorch Geometric:
 
 ```bash
-# Pre-training on all three domains
-python train.py --config configs/cross_domain.json
-
-# Training outputs saved to experiments/cross_domain_pretraining/
+geoshift-download --data-dir data
 ```
 
-### 3. Evaluate on GeoShift Benchmark
+ANI-1x is distributed as a single HDF5 file (`ani1x-release.h5`, ~5 GB).
+Download it from the
+[figshare release](https://springernature.figshare.com/articles/dataset/ANI-1x_Dataset_Release/10047041)
+and place it at `data/ani1x/ani1x-release.h5`.
+
+## Reproducing the experiments
+
+All experiments are driven by the JSON files in [`configs/`](configs). Each
+run writes its outputs to its own directory (see [Outputs](#outputs)).
 
 ```bash
-# Evaluate transfer performance
-python evaluate.py \
-    --checkpoint experiments/cross_domain_pretraining/best_model.pt \
-    --benchmark geoshift
+# 1. Cross-domain pre-training (QM9 + MD17 + ANI-1x)
+geoshift-train --config configs/cross_domain.json
 
-# Results saved to experiments/evaluation/
+# 2. Single-domain baseline (QM9 only)
+geoshift-train --config configs/single_domain.json
+
+# 3. Transfer to a new domain (fine-tuning on revised MD17 aspirin)
+geoshift-train --config configs/transfer.json \
+    --pretrained experiments/cross_domain/best_model.pt
+
+# 4. Evaluate a checkpoint on a dataset it was not trained on
+geoshift-evaluate --checkpoint experiments/cross_domain/best_model.pt \
+    --dataset rmd17:aspirin --split all
+geoshift-evaluate --checkpoint experiments/single_domain/best_model.pt \
+    --dataset rmd17:aspirin --split all
+
+# 5. Compare the two
+python scripts/analyze_results.py \
+    --model experiments/cross_domain/eval_all_rmd17-aspirin.json \
+    --baseline experiments/single_domain/eval_all_rmd17-aspirin.json
 ```
 
-### 4. Fine-tune on Target Task
+Useful command-line overrides for `geoshift-train`: `--seed`, `--epochs`,
+`--batch-size`, `--lr`, `--output-dir`, `--data-dir`, `--device`,
+`--max-samples` (cap molecules per dataset for a quick run) and `--resume`.
 
-```bash
-# Transfer learning to new domain
-python train.py \
-    --config configs/transfer.json \
-    --pretrained experiments/cross_domain_pretraining/best_model.pt \
-    --target-dataset your_dataset
-```
+To evaluate transfer to larger molecules, restrict a dataset by atom count,
+for example `{"name": "qm9", "min_atoms": 20}` in a config's `datasets` list.
 
----
+Results vary slightly between hardware and library versions even with fixed
+seeds, because some GPU scatter operations are non-deterministic. Each run
+records the software versions and git commit it used in `environment.json`.
 
-## 📁 Repository Structure
+### Outputs
 
-```
-molecular-foundation-models/
-├── README.md                      # This file
-├── LICENSE                        # MIT License
-├── requirements.txt               # Dependencies
-├── setup.py                       # Package installation
-│
-├── src/                          # Source code
-│   ├── model.py                  # EGNN-PaiNN architecture
-│   ├── train.py                  # Training loop
-│   ├── evaluate.py               # Evaluation utilities
-│   ├── data/                     # Dataset classes
-│   │   ├── qm9.py
-│   │   ├── md17.py
-│   │   └── ani1x.py
-│   ├── models/                   # Model components
-│   │   ├── egnn.py              # EGNN layers
-│   │   ├── painn.py             # PaiNN layers
-│   │   └── heads.py             # Task heads
-│   └── utils/                    # Utilities
-│       ├── metrics.py
-│       └── visualization.py
-│
-├── configs/                      # Configuration files
-│   ├── cross_domain.json        # Full pre-training
-│   ├── single_domain.json       # Baseline
-│   └── transfer.json            # Transfer learning
-│
-├── scripts/                      # Utility scripts
-│   ├── download_datasets.py     # Download data
-│   ├── preprocess.py            # Data preprocessing
-│   └── analyze_results.py       # Result analysis
-│
-├── notebooks/                    # Jupyter notebooks
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_training_demo.ipynb
-│   └── 03_results_analysis.ipynb
-│
-├── tests/                        # Unit tests
-│   ├── test_model.py
-│   ├── test_data.py
-│   └── test_training.py
-│
-└── docs/                         # Documentation
-    ├── TRAINING.md              # Training guide
-    ├── EVALUATION.md            # Evaluation guide
-    ├── API.md                   # API reference
-    └── images/                  # Figures
-```
+| File | Content |
+|---|---|
+| `config.json` | Fully resolved configuration, including command-line overrides |
+| `environment.json` | Python, PyTorch, PyG and CUDA versions, GPU and git commit |
+| `splits.json` | Indices of the train/val/test molecules in each source dataset |
+| `metrics.csv` | Per-epoch training and validation losses and learning rate |
+| `best_model.pt`, `last.pt` | Best (lowest validation loss) and most recent checkpoints |
+| `test_metrics.json` | Test-set metrics of the best checkpoint, overall and per dataset |
+| `tensorboard/` | TensorBoard logs (if enabled and installed) |
 
----
+Reported metrics are MAE, RMSE and R² for energies (eV), HOMO-LUMO gaps (eV)
+and force components (eV/Å). Each evaluation also reports the largest change in
+predictions under a random rotation and translation of the input, which checks
+the model's symmetry numerically.
 
-## 🔬 Datasets
+## Model
 
-### QM9
-- **Size:** 134,000 small organic molecules
-- **Properties:** 13 quantum mechanical properties
-- **Source:** [QM9 Database](https://figshare.com/collections/Quantum_chemistry_structures_and_properties_of_134_kilo_molecules/978904)
+The network (`src/geoshift/model.py`) embeds atomic numbers and applies a stack
+of interaction blocks on a radius graph (default cutoff 5 Å). Each block
+consists of
 
-### MD17
-- **Size:** 8 molecular systems, ~1M conformations
-- **Properties:** Energies and forces from MD simulations
-- **Source:** [MD17 Dataset](http://quantum-machine.org/gdml/#datasets)
+1. an **equivariant message-passing layer** (EGNN-style): messages are
+   computed from the features of both atoms and their distance, weighted by a
+   smooth cutoff envelope; they update scalar features and accumulate vector
+   features along the interatomic directions;
+2. a **scalar–vector mixing layer** (PaiNN-style): vector-feature norms update
+   the scalar features, which in turn gate the vector features.
 
-### ANI-1x
-- **Size:** 5M molecular conformations
-- **Properties:** DFT energies for diverse molecules
-- **Source:** [ANI-1x Dataset](https://github.com/isayev/ANI1x_datasets)
+Atom-wise outputs are pooled to molecule-level predictions. The multitask
+variant shares the encoder across tasks (energy, HOMO-LUMO gap) with one
+output head per task. Forces are computed as the negative gradient of the
+predicted energy, so they are conservative and rotate correctly with the
+molecule.
 
-**Total:** ~23 GB | **Download time:** 30-60 minutes on first run
+The default configuration has 5 blocks, 128 scalar and 64 vector channels, and
+about 0.93M parameters.
 
----
+Training uses a weighted sum of energy, gap and force losses. Each loss term
+only uses the molecules that have that label, so datasets with different
+labels can be mixed in one batch. Energies are referenced to a per-element
+linear fit on the training set and standardised before training.
 
-## ⚙️ Configuration
+## Configuration
 
-Training is configured via JSON files. Example:
+A configuration has the following sections (see `configs/cross_domain.json`
+for a complete example):
+
+| Section | Key | Meaning |
+|---|---|---|
+| top level | `output_dir`, `seed`, `deterministic` | Output location and reproducibility settings |
+| `model` | `hidden_dim`, `vector_dim`, `n_layers`, `cutoff` | Network size and interaction radius (Å) |
+| | `readout` | `"mean"` or `"sum"` pooling of atom outputs |
+| | `multitask`, `task_dims` | Shared encoder with one head per task |
+| `data` | `datasets` | List of dataset specs (below) |
+| | `dataset_weights` | Sampling probability of each dataset per batch |
+| | `train_split`, `val_split`, `test_split` | Split fractions, applied per dataset |
+| | `max_train_samples` | Cap on training molecules per dataset (few-shot runs) |
+| | `energy_reference` | `"linear_fit"` (per-element reference energies) or `"none"` |
+| `training` | `epochs`, `batch_size`, `learning_rate`, `weight_decay`, `gradient_clip` | Optimisation (AdamW) |
+| | `scheduler` | `{"type": "reduce_on_plateau" \| "cosine", ...}` |
+| | `early_stopping_patience`, `save_frequency` | Stopping and checkpointing |
+| | `freeze_backbone_epochs` | Train only the output heads for the first N epochs |
+| | `use_amp` | Mixed precision (CUDA only) |
+| `loss` | `criterion`, `weights` | `"mae"` or `"mse"`; weights for `energy`, `homo_lumo_gap`, `forces` |
+| `transfer` | `pretrained_checkpoint` | Initialise from a checkpoint; tensors are matched by name and shape |
+
+Dataset specs are either a name or an object with options:
 
 ```json
-{
-  "model": {
-    "hidden_dim": 128,
-    "vector_dim": 64,
-    "n_layers": 5,
-    "cutoff": 5.0,
-    "num_rbf": 20,
-    "multitask": true
-  },
-  "training": {
-    "epochs": 100,
-    "batch_size": 32,
-    "learning_rate": 0.001,
-    "weight_decay": 1e-5,
-    "scheduler": "reduce_on_plateau",
-    "patience": 10
-  },
-  "data": {
-    "mode": "cross_domain",
-    "datasets": ["qm9", "md17", "ani1x"],
-    "train_split": 0.8,
-    "val_split": 0.1,
-    "test_split": 0.1
-  }
-}
+"qm9"
+"md17:aspirin"
+"rmd17:aspirin"
+{"name": "ani1x", "max_samples": 50000}
+{"name": "qm9", "min_atoms": 20, "max_atoms": 29}
 ```
 
-See `configs/` for complete examples.
+## Repository layout
 
----
-
-## 📊 Training
-
-### Basic Training
-
-```bash
-# Train on single domain (baseline)
-python train.py --config configs/single_domain.json
-
-# Train on cross-domain (our method)
-python train.py --config configs/cross_domain.json
+```
+configs/            experiment configurations
+scripts/            dataset download and result comparison
+src/geoshift/
+    model.py        equivariant network
+    data.py         dataset loading, splits, normalisation
+    train.py        training entry point (geoshift-train)
+    evaluate.py     metrics and evaluation entry point (geoshift-evaluate)
+    download.py     dataset download (geoshift-download)
+    utils.py        configuration, seeding, provenance
+tests/              unit and end-to-end tests
 ```
 
-### Advanced Options
+## Citation
 
-```bash
-# Resume from checkpoint
-python train.py --config configs/cross_domain.json \
-    --resume experiments/cross_domain/checkpoint_50.pt
-
-# Train with custom parameters
-python train.py --config configs/cross_domain.json \
-    --epochs 150 \
-    --batch-size 64 \
-    --lr 0.0005
-
-# Enable debug mode (verbose logging)
-python train.py --config configs/cross_domain.json --debug
-```
-
-### Monitoring
-
-```bash
-# TensorBoard visualization
-tensorboard --logdir experiments/
-
-# Real-time logging
-tail -f experiments/cross_domain_pretraining/train.log
-```
-
----
-
-## 🧪 Evaluation
-
-### GeoShift Benchmark
-
-```bash
-# Evaluate all transfer tasks
-python evaluate.py \
-    --checkpoint experiments/cross_domain/best_model.pt \
-    --benchmark geoshift
-
-# Evaluate specific task
-python evaluate.py \
-    --checkpoint experiments/cross_domain/best_model.pt \
-    --task small_to_large
-```
-
-### Custom Evaluation
-
-```bash
-# Evaluate on your own dataset
-python evaluate.py \
-    --checkpoint experiments/cross_domain/best_model.pt \
-    --dataset path/to/your/data.xyz \
-    --metrics energy_mae force_mae
-```
-
-### Metrics Computed
-
-- **Energy MAE** - Mean absolute error (eV)
-- **Force MAE** - Mean absolute error (kcal/mol/Å)
-- **Energy RMSE** - Root mean squared error (eV)
-- **R² Score** - Coefficient of determination
-- **Physics Compliance** - Energy conservation, force consistency
-
----
-
-## 🎓 Method Details
-
-### Cross-Domain Pre-training
-
-1. **Multi-Domain Sampling**
-   - Batch construction: Mix samples from QM9, MD17, ANI-1x
-   - Adaptive sampling: Balance based on dataset sizes
-
-2. **Physics-Augmented Loss**
-   ```
-   L_total = L_energy + λ_force * L_force + λ_physics * L_physics
-   
-   where:
-   L_energy = MAE(E_pred, E_true)
-   L_force = MAE(F_pred, F_true)
-   L_physics = Energy conservation penalty
-   ```
-
-3. **Multi-Task Learning**
-   - Shared backbone: EGNN-PaiNN hybrid
-   - Task-specific heads: Energy, HOMO-LUMO gap
-   - Dynamic task weighting
-
-### Transfer Learning
-
-1. **Feature Freezing Strategy**
-   - Freeze backbone layers
-   - Fine-tune task heads
-   - Gradually unfreeze layers
-
-2. **Few-Shot Adaptation**
-   - Pre-trained features + minimal target data
-   - Achieves strong performance with 100-1000 samples
-
----
-
-## 🔬 Reproducing Results
-
-### Full Experimental Pipeline
-
-```bash
-# 1. Download all datasets
-python scripts/download_datasets.py
-
-# 2. Pre-train cross-domain model (takes ~38 hours on V100)
-python train.py --config configs/cross_domain.json
-
-# 3. Train baseline (single-domain)
-python train.py --config configs/single_domain.json
-
-# 4. Evaluate both on GeoShift
-python evaluate.py --checkpoint experiments/cross_domain/best_model.pt --benchmark geoshift
-python evaluate.py --checkpoint experiments/single_domain/best_model.pt --benchmark geoshift
-
-# 5. Generate comparison plots
-python scripts/analyze_results.py \
-    --cross-domain experiments/cross_domain/results.json \
-    --baseline experiments/single_domain/results.json \
-    --output docs/images/
-```
-
-### Expected Results
-
-After full training (100 epochs):
-- Cross-domain validation MAE: 0.042 eV
-- Baseline validation MAE: 0.071 eV
-- GeoShift average improvement: ~35%
-
----
-
-## 📚 Citation
-
-If you use this code or our methods in your research, please cite:
+If you use this code, please cite:
 
 ```bibtex
-@article{KRRoy2025molecular,
-  title={Cross-Domain Foundation Models for Electrostatics: 
-         Pre-training Neural Operators Across Molecular Physics},
-  author={Kushal Raj Roy},
-  journal={APL Computational Physics},
-  year={2025},
-  note={arXiv preprint arXiv:XXXX.XXXXX}
+@article{roy2025geoshift,
+  title   = {Cross-Domain Foundation Models for Electrostatics: Pre-training Neural Operators Across Molecular Physics},
+  author  = {Roy, Kushal Raj},
+  journal = {APL Computational Physics},
+  year    = {2025}
 }
 ```
 
----
+Please also cite the datasets you use: QM9 (Ramakrishnan et al., *Sci. Data*
+2014), MD17 (Chmiela et al., *Sci. Adv.* 2017), revised MD17 (Christensen and
+von Lilienfeld, *Mach. Learn.: Sci. Technol.* 2020) and ANI-1x (Smith et al.,
+*Sci. Data* 2020).
 
-## 🤝 Contributing
+## License
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Ways to contribute:**
-- 🐛 Report bugs
-- 💡 Suggest features
-- 📝 Improve documentation
-- 🔬 Add new datasets or benchmarks
-- 🎨 Visualization improvements
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- PyTorch Geometric team for excellent GNN library
-- QM9, MD17, and ANI dataset creators
-- Anthropic for Claude assistance in development
-
----
-
-## 📞 Contact
-
-- **Issues:** [GitHub Issues](https://github.com/YOUR_USERNAME/molecular-foundation-models/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/YOUR_USERNAME/molecular-foundation-models/discussions)
-- **Email:** your.email@institution.edu
-
----
-
-<div align="center">
-
-**Built with ❤️ for the computational chemistry community**
-
-⭐ **Star this repo if you find it useful!** ⭐
-
-</div>
+Released under the [MIT License](LICENSE).

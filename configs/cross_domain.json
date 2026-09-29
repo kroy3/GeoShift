@@ -1,125 +1,60 @@
 {
-  "experiment_name": "cross_domain_pretraining",
-  "exp_dir": "./experiments/cross_domain_pretraining",
-  
+  "experiment_name": "cross_domain",
+  "output_dir": "experiments/cross_domain",
+  "seed": 42,
+  "deterministic": true,
+
   "model": {
-    "type": "egnn_painn_hybrid",
     "hidden_dim": 128,
     "vector_dim": 64,
     "n_layers": 5,
-    "egnn_layers": 3,
-    "painn_layers": 2,
     "cutoff": 5.0,
-    "num_rbf": 20,
-    "activation": "silu",
+    "readout": "mean",
     "multitask": true,
-    "task_dims": {
-      "energy": 1,
-      "homo_lumo_gap": 1
-    }
+    "task_dims": {"energy": 1, "homo_lumo_gap": 1}
   },
-  
+
+  "data": {
+    "data_dir": "data",
+    "datasets": [
+      {"name": "qm9", "max_samples": 50000},
+      {"name": "md17:aspirin", "max_samples": 1250},
+      {"name": "md17:benzene", "max_samples": 1250},
+      {"name": "md17:ethanol", "max_samples": 1250},
+      {"name": "md17:malonaldehyde", "max_samples": 1250},
+      {"name": "ani1x", "max_samples": 50000}
+    ],
+    "dataset_weights": {
+      "qm9": 0.4,
+      "md17:aspirin": 0.075,
+      "md17:benzene": 0.075,
+      "md17:ethanol": 0.075,
+      "md17:malonaldehyde": 0.075,
+      "ani1x": 0.3
+    },
+    "train_split": 0.8,
+    "val_split": 0.1,
+    "test_split": 0.1,
+    "energy_reference": "linear_fit",
+    "num_workers": 4
+  },
+
   "training": {
     "epochs": 100,
     "batch_size": 32,
     "learning_rate": 0.001,
-    "min_lr": 1e-6,
     "weight_decay": 1e-5,
     "gradient_clip": 1.0,
-    "scheduler": {
-      "type": "reduce_on_plateau",
-      "mode": "min",
-      "factor": 0.5,
-      "patience": 10,
-      "min_lr": 1e-6
-    },
-    "early_stopping": {
-      "patience": 20,
-      "min_delta": 1e-4
-    },
-    "use_amp": true,
+    "scheduler": {"type": "reduce_on_plateau", "factor": 0.5, "patience": 10, "min_lr": 1e-6},
+    "early_stopping_patience": 20,
+    "use_amp": false,
     "save_frequency": 10
   },
-  
-  "data": {
-    "mode": "cross_domain",
-    "datasets": ["qm9", "md17", "ani1x"],
-    "data_dir": "./data",
-    "batch_size": 32,
-    "num_workers": 4,
-    "persistent_workers": true,
-    "pin_memory": true,
-    "train_split": 0.8,
-    "val_split": 0.1,
-    "test_split": 0.1,
-    "shuffle": true,
-    "drop_last": false,
-    "multidomain_sampling": {
-      "strategy": "balanced",
-      "dataset_weights": {
-        "qm9": 0.4,
-        "md17": 0.3,
-        "ani1x": 0.3
-      }
-    }
-  },
-  
+
   "loss": {
-    "type": "physics_augmented",
-    "energy_weight": 1.0,
-    "force_weight": 0.5,
-    "physics_weight": 0.1,
-    "task_weights": {
-      "energy": 1.0,
-      "homo_lumo_gap": 0.5
-    },
-    "adaptive_weighting": true,
-    "energy_criterion": "mae",
-    "force_criterion": "mae"
+    "criterion": "mae",
+    "weights": {"energy": 1.0, "homo_lumo_gap": 0.5, "forces": 0.5}
   },
-  
-  "physics_constraints": {
-    "energy_conservation": true,
-    "force_consistency": true,
-    "rotational_equivariance": true,
-    "tolerance": 1e-4
-  },
-  
-  "evaluation": {
-    "metrics": [
-      "energy_mae",
-      "energy_rmse",
-      "force_mae",
-      "force_rmse",
-      "r2_score",
-      "physics_compliance"
-    ],
-    "evaluate_every": 1,
-    "save_predictions": false
-  },
-  
-  "logging": {
-    "use_tensorboard": true,
-    "tensorboard_dir": "./experiments/cross_domain_pretraining/tensorboard",
-    "log_interval": 10,
-    "save_model": true,
-    "save_optimizer": true,
-    "save_scheduler": true,
-    "verbose": true
-  },
-  
-  "reproducibility": {
-    "seed": 42,
-    "deterministic": true,
-    "benchmark": false
-  },
-  
-  "hardware": {
-    "device": "cuda",
-    "gpu_ids": [0],
-    "distributed": false,
-    "num_gpus": 1
-  },
-  
-  "notes": "Full cross-domain pre-training configuration for EGNN-PaiNN hybrid model."
+
+  "logging": {"tensorboard": true}
 }
