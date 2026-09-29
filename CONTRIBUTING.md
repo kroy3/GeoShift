@@ -16,14 +16,14 @@ Please open an issue that includes:
 ```bash
 pip install -e ".[dev,analysis]"
 pytest
-ruff check src/geoshift tests scripts
+ruff check src tests scripts
 ```
 
 ## Pull requests
 
 - Keep changes focused and describe what they change and why.
 - Add or update tests in `tests/` for new behaviour.
-- Make sure `pytest` and `ruff check src/geoshift tests scripts` pass.
+- Make sure `pytest` and `ruff check src tests scripts` pass.
 - Changes to the model or training pipeline should not alter the results of
   existing configurations unless that is the purpose of the change; if they
   do, say so in the pull request.
