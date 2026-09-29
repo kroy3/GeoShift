@@ -509,15 +509,6 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 - PyTorch Geometric team for excellent GNN library
 - QM9, MD17, and ANI dataset creators
 - Anthropic for Claude assistance in development
-
----
-
-## 📞 Contact
-
-- **Issues:** [GitHub Issues](https://github.com/YOUR_USERNAME/molecular-foundation-models/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/YOUR_USERNAME/molecular-foundation-models/discussions)
-- **Email:** your.email@institution.edu
-
 ---
 
 <div align="center">
