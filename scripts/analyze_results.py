@@ -1,140 +1,78 @@
-"""
-Analyze and visualize experimental results.
+"""Compare two evaluation results (e.g. cross-domain vs. single-domain baseline).
+
+Inputs are JSON files written by ``geoshift-evaluate`` or ``test_metrics.json``
+files written by ``geoshift-train``. Produces a Markdown table and, if
+matplotlib is installed, a bar chart.
+
+Example::
+
+    python scripts/analyze_results.py \
+        --model experiments/cross_domain/eval_all_rmd17-aspirin.json \
+        --baseline experiments/single_domain/eval_all_rmd17-aspirin.json \
+        --metric energy_mae --output results/
 """
 
 import argparse
 import json
-import os
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sns
+SKIP = {"equivariance", "meta", "best_epoch", "training_time_hours"}
 
 
-def load_results(result_file):
-    """Load results from JSON file."""
-    with open(result_file, 'r') as f:
-        return json.load(f)
-
-
-def plot_comparison(cross_domain_results, baseline_results, output_dir):
-    """Plot comparison between cross-domain and baseline."""
-    
-    # Extract metrics
-    tasks = list(cross_domain_results.keys())
-    
-    cd_maes = [cross_domain_results[task]["energy_mae"] for task in tasks]
-    bl_maes = [baseline_results[task]["energy_mae"] for task in tasks]
-    
-    # Create comparison plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    
-    x = np.arange(len(tasks))
-    width = 0.35
-    
-    ax.bar(x - width/2, bl_maes, width, label='Baseline', color='#e74c3c', alpha=0.8)
-    ax.bar(x + width/2, cd_maes, width, label='Cross-Domain', color='#27ae60', alpha=0.8)
-    
-    ax.set_xlabel('GeoShift Tasks', fontsize=14)
-    ax.set_ylabel('Energy MAE (eV)', fontsize=14)
-    ax.set_title('Cross-Domain vs Baseline Performance', fontsize=16)
-    ax.set_xticks(x)
-    ax.set_xticklabels([task.replace('_', ' ').title() for task in tasks], rotation=45, ha='right')
-    ax.legend(fontsize=12)
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'comparison.png'), dpi=300)
-    print(f"Saved comparison plot to {output_dir}/comparison.png")
-    
-    # Compute improvements
-    improvements = [(bl - cd) / bl * 100 for bl, cd in zip(bl_maes, cd_maes)]
-    avg_improvement = np.mean(improvements)
-    
-    print(f"\nAverage improvement: {avg_improvement:.1f}%")
-    for task, imp in zip(tasks, improvements):
-        print(f"  {task}: {imp:.1f}%")
-
-
-def plot_sample_efficiency(train_sizes, cd_scores, bl_scores, output_dir):
-    """Plot sample efficiency curves."""
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    ax.plot(train_sizes, bl_scores, 'o-', label='Baseline', color='#e74c3c', linewidth=2)
-    ax.plot(train_sizes, cd_scores, 'o-', label='Cross-Domain', color='#27ae60', linewidth=2)
-    
-    ax.set_xlabel('Training Samples', fontsize=14)
-    ax.set_ylabel('Test MAE (eV)', fontsize=14)
-    ax.set_title('Sample Efficiency', fontsize=16)
-    ax.set_xscale('log')
-    ax.legend(fontsize=12)
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'sample_efficiency.png'), dpi=300)
-    print(f"Saved sample efficiency plot to {output_dir}/sample_efficiency.png")
-
-
-def generate_report(cross_domain_results, baseline_results, output_dir):
-    """Generate markdown report."""
-    
-    report = "# Experimental Results\n\n"
-    report += "## GeoShift Benchmark Results\n\n"
-    report += "| Task | Baseline MAE | Cross-Domain MAE | Improvement |\n"
-    report += "|------|--------------|------------------|-------------|\n"
-    
-    for task in cross_domain_results.keys():
-        bl_mae = baseline_results[task]["energy_mae"]
-        cd_mae = cross_domain_results[task]["energy_mae"]
-        improvement = (bl_mae - cd_mae) / bl_mae * 100
-        
-        report += f"| {task.replace('_', ' ').title()} | {bl_mae:.4f} | {cd_mae:.4f} | **{improvement:.1f}%** |\n"
-    
-    # Overall statistics
-    bl_maes = [baseline_results[task]["energy_mae"] for task in cross_domain_results.keys()]
-    cd_maes = [cross_domain_results[task]["energy_mae"] for task in cross_domain_results.keys()]
-    
-    avg_improvement = np.mean([(bl - cd) / bl * 100 for bl, cd in zip(bl_maes, cd_maes)])
-    
-    report += f"\n**Average Improvement:** {avg_improvement:.1f}%\n\n"
-    
-    # Save report
-    with open(os.path.join(output_dir, 'RESULTS.md'), 'w') as f:
-        f.write(report)
-    
-    print(f"Saved report to {output_dir}/RESULTS.md")
+def load(path):
+    data = json.loads(Path(path).read_text())
+    return {k: v for k, v in data.items() if k not in SKIP and isinstance(v, dict)}
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Analyze experimental results")
-    parser.add_argument("--cross-domain", type=str, required=True,
-                        help="Path to cross-domain results JSON")
-    parser.add_argument("--baseline", type=str, required=True,
-                        help="Path to baseline results JSON")
-    parser.add_argument("--output", type=str, default="./docs/images",
-                        help="Output directory for plots")
-    
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--model", required=True, help="Results of the model under test.")
+    parser.add_argument("--baseline", required=True, help="Results of the baseline.")
+    parser.add_argument("--metric", default="energy_mae")
+    parser.add_argument("--labels", nargs=2, default=["Cross-domain", "Baseline"])
+    parser.add_argument("--output", default="results")
     args = parser.parse_args()
-    
-    # Create output directory
-    os.makedirs(args.output, exist_ok=True)
-    
-    # Load results
-    print("Loading results...")
-    cd_results = load_results(args.cross_domain)
-    bl_results = load_results(args.baseline)
-    
-    # Generate plots
-    print("\nGenerating plots...")
-    plot_comparison(cd_results, bl_results, args.output)
-    
-    # Generate report
-    print("\nGenerating report...")
-    generate_report(cd_results, bl_results, args.output)
-    
-    print("\nAnalysis complete!")
+
+    model, baseline = load(args.model), load(args.baseline)
+    groups = [g for g in model if g in baseline and args.metric in model[g] and args.metric in baseline[g]]
+    if not groups:
+        raise SystemExit(f"No dataset groups with metric '{args.metric}' in both files.")
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    rows = [
+        f"| Dataset | {args.labels[1]} | {args.labels[0]} | Relative change |",
+        "|---|---|---|---|",
+    ]
+    for g in groups:
+        b, m = baseline[g][args.metric], model[g][args.metric]
+        rows.append(f"| {g} | {b:.4f} | {m:.4f} | {100 * (m - b) / b:+.1f}% |")
+    table = "\n".join(rows)
+    (out_dir / f"comparison_{args.metric}.md").write_text(table + "\n")
+    print(table)
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not installed; skipping plot.")
+        return
+
+    x = range(len(groups))
+    fig, ax = plt.subplots(figsize=(max(5, 1.4 * len(groups)), 4))
+    ax.bar([i - 0.2 for i in x], [baseline[g][args.metric] for g in groups], 0.4, label=args.labels[1])
+    ax.bar([i + 0.2 for i in x], [model[g][args.metric] for g in groups], 0.4, label=args.labels[0])
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(groups, rotation=30, ha="right")
+    ax.set_ylabel(args.metric)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(out_dir / f"comparison_{args.metric}.pdf")
+    fig.savefig(out_dir / f"comparison_{args.metric}.png", dpi=200)
+    print(f"Saved figures to {out_dir}")
 
 
 if __name__ == "__main__":

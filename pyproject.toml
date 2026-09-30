@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geoshift"
+version = "1.0.0"
+description = "Cross-domain pre-training of equivariant neural networks for molecular electrostatics"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Kushal Raj Roy"}]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0",
+    "torch_geometric>=2.3",
+    "numpy>=1.23",
+    "h5py>=3.8",
+]
+keywords = ["molecular machine learning", "equivariant neural networks", "transfer learning", "electrostatics"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.optional-dependencies]
+analysis = ["matplotlib>=3.6", "tensorboard>=2.12"]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+geoshift-train = "geoshift.train:main"
+geoshift-evaluate = "geoshift.evaluate:main"
+geoshift-download = "geoshift.download:main"
+
+[project.urls]
+Repository = "https://github.com/kroy3/geoshift"
+Issues = "https://github.com/kroy3/geoshift/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["geoshift*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

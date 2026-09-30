@@ -1,251 +1,68 @@
-# Training Guide
+# Training guide
 
-Complete guide to training cross-domain molecular models.
+This guide covers practical details not in the [README](../README.md).
 
-## Quick Start
+## Quick runs
 
-### Basic Training
-
-```bash
-# Train cross-domain model
-python train.py --config configs/cross_domain.json
-
-# Train baseline (single-domain)
-python train.py --config configs/single_domain.json
-```
-
-### Monitor Training
+Before a full run, check the setup with a small subset:
 
 ```bash
-# TensorBoard
-tensorboard --logdir experiments/
-
-# Or watch log file
-tail -f experiments/cross_domain_pretraining/train.log
+geoshift-train --config configs/cross_domain.json \
+    --max-samples 500 --epochs 2 --output-dir experiments/debug
 ```
 
-## Training Modes
+`--max-samples` caps the number of molecules loaded from each dataset.
 
-### 1. Cross-Domain Pre-training
+## Resuming
 
-Pre-train on multiple datasets simultaneously:
-
-```json
-{
-  "data": {
-    "mode": "cross_domain",
-    "datasets": ["qm9", "md17", "ani1x"],
-    "multidomain_sampling": {
-      "strategy": "balanced",
-      "dataset_weights": {
-        "qm9": 0.4,
-        "md17": 0.3,
-        "ani1x": 0.3
-      }
-    }
-  }
-}
-```
-
-### 2. Single-Domain Training (Baseline)
-
-Train on one dataset:
-
-```json
-{
-  "data": {
-    "mode": "single_domain",
-    "datasets": ["qm9"]
-  }
-}
-```
-
-### 3. Transfer Learning
-
-Fine-tune pre-trained model:
+`last.pt` is written after every epoch. To continue an interrupted run:
 
 ```bash
-python train.py \
-    --config configs/transfer.json \
-    --pretrained experiments/cross_domain/best_model.pt
+geoshift-train --config configs/cross_domain.json --resume experiments/cross_domain/last.pt
 ```
 
-## Configuration Options
+The optimiser, scheduler, normalisation constants and early-stopping state are
+restored from the checkpoint.
 
-### Model Architecture
+## Transfer and few-shot learning
 
-```json
-{
-  "model": {
-    "hidden_dim": 128,        // Node feature dimension
-    "vector_dim": 64,         // Vector feature dimension
-    "n_layers": 5,            // Total layers
-    "egnn_layers": 3,         // EGNN layers
-    "painn_layers": 2,        // PaiNN layers
-    "cutoff": 5.0,            // Interaction cutoff (Å)
-    "num_rbf": 20,            // Radial basis functions
-    "activation": "silu"      // Activation function
-  }
-}
-```
+`--pretrained` (or `transfer.pretrained_checkpoint` in the config) copies every
+tensor whose name and shape match the new model, and new output heads are
+initialised randomly. Loading works between the multitask and single-task
+model classes. Use the same `hidden_dim`, `vector_dim`, `n_layers` and
+`cutoff` as the pre-trained model.
 
-### Training Hyperparameters
+- `training.freeze_backbone_epochs`: train only the output heads for the first
+  N epochs, then fine-tune the whole network.
+- `data.max_train_samples` (or `--max-train-samples`): use at most N training
+  molecules per dataset. The validation and test splits are unaffected, so
+  runs with different N are evaluated on the same molecules.
 
-```json
-{
-  "training": {
-    "epochs": 100,
-    "batch_size": 32,
-    "learning_rate": 0.001,
-    "weight_decay": 1e-5,
-    "gradient_clip": 1.0,
-    "use_amp": true           // Automatic mixed precision
-  }
-}
-```
-
-### Learning Rate Schedule
-
-```json
-{
-  "training": {
-    "scheduler": {
-      "type": "reduce_on_plateau",
-      "factor": 0.5,
-      "patience": 10,
-      "min_lr": 1e-6
-    }
-  }
-}
-```
-
-### Loss Function
-
-```json
-{
-  "loss": {
-    "type": "physics_augmented",
-    "energy_weight": 1.0,
-    "force_weight": 0.5,
-    "physics_weight": 0.1
-  }
-}
-```
-
-## Advanced Options
-
-### Resume Training
+Sample-efficiency curve, pre-trained vs. from scratch:
 
 ```bash
-python train.py \
-    --config configs/cross_domain.json \
-    --resume experiments/cross_domain/checkpoint_50.pt
+for n in 50 100 250 500 1000; do
+  geoshift-train --config configs/transfer.json --max-train-samples $n \
+      --output-dir experiments/transfer_pretrained_n$n
+  geoshift-train --config configs/transfer.json --max-train-samples $n \
+      --pretrained "" --output-dir experiments/transfer_scratch_n$n
+done
 ```
 
-### Custom Learning Rate
+`configs/transfer.json` loads `experiments/cross_domain/best_model.pt` by
+default; `--pretrained ""` disables this.
 
-```bash
-python train.py \
-    --config configs/cross_domain.json \
-    --lr 0.0005
-```
+## Mixing datasets
 
-### Debug Mode
-
-```bash
-python train.py \
-    --config configs/cross_domain.json \
-    --debug
-```
-
-## Training Tips
-
-### 1. Start Small
-
-Test with fewer epochs first:
-
-```bash
-python train.py --config configs/cross_domain.json --epochs 10
-```
-
-### 2. Monitor Overfitting
-
-Watch for training vs validation loss divergence.
-
-### 3. Adjust Batch Size
-
-Larger batch size = faster training but more memory:
-
-```bash
-python train.py --config configs/cross_domain.json --batch-size 64
-```
-
-### 4. Use Mixed Precision
-
-Enable AMP for faster training:
-
-```json
-{
-  "training": {
-    "use_amp": true
-  }
-}
-```
-
-## Expected Training Times
-
-| GPU | Batch Size | Time/Epoch | Total (100 epochs) |
-|-----|------------|------------|-------------------|
-| T4  | 32         | 45 min     | ~75 hours         |
-| V100| 32         | 23 min     | ~38 hours         |
-| A100| 64         | 15 min     | ~25 hours         |
+With several datasets, `data.dataset_weights` sets the probability of drawing
+each dataset (with replacement) when building batches, independent of dataset
+size. Without it, all training molecules are shuffled together.
 
 ## Troubleshooting
 
-### Out of Memory
-
-- Reduce batch size
-- Reduce model size (hidden_dim, n_layers)
-- Enable gradient checkpointing
-
-### Slow Training
-
-- Enable mixed precision (AMP)
-- Increase batch size
-- Use multiple GPUs (if available)
-
-### NaN Loss
-
-- Reduce learning rate
-- Enable gradient clipping
-- Check data normalization
-
-### Poor Convergence
-
-- Adjust learning rate schedule
-- Try different optimizer
-- Check data quality
-
-## Output Files
-
-Training creates:
-
-```
-experiments/cross_domain_pretraining/
-├── config.json              # Configuration
-├── train.log                # Training log
-├── metrics.json             # Training metrics
-├── checkpoints/             # Model checkpoints
-│   ├── epoch_010.pt
-│   ├── epoch_020.pt
-│   └── best_model.pt
-└── tensorboard/             # TensorBoard logs
-```
-
-## Next Steps
-
-After training:
-
-1. Evaluate model: `python evaluate.py --checkpoint best_model.pt`
-2. Analyze results: `python scripts/analyze_results.py`
-3. Fine-tune on target task: `python train.py --config configs/transfer.json`
+| Symptom | Things to try |
+|---|---|
+| Out of GPU memory | Lower `batch_size`; lower `hidden_dim`; shorten `cutoff` |
+| Loss becomes NaN | Lower `learning_rate`; keep `gradient_clip` enabled; disable `use_amp` |
+| Slow data loading | Increase `data.num_workers`; the first QM9/MD17 load includes download and processing |
+| `FileNotFoundError` for ANI-1x | See "Datasets" in the README; the file must be at `data/ani1x/ani1x-release.h5` |
