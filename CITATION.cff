@@ -1,19 +1,21 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the article below."
-title: "GeoShift: Cross-Domain Foundation Models for Electrostatics"
+title: "GeoShift: Cross-Geometry Pretraining for Equivariant Neural Networks"
 version: 1.0.0
 license: MIT
 repository-code: "https://github.com/kroy3/geoshift"
 authors:
   - family-names: Roy
     given-names: Kushal Raj
+    affiliation: "Department of Biochemistry, University of Houston"
 preferred-citation:
   type: article
-  title: "Cross-Domain Foundation Models for Electrostatics: Pre-training Neural Operators Across Molecular Physics"
+  title: "Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints"
   authors:
     - family-names: Roy
       given-names: Kushal Raj
+      affiliation: "Department of Biochemistry, University of Houston"
   journal: "APL Computational Physics"
-  year: 2025
+  year: 2026
   doi: "10.1063/5.0317737"
   url: "https://doi.org/10.1063/5.0317737"
