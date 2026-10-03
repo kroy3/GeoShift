@@ -1,12 +1,15 @@
-# GeoShift: Cross-Domain Foundation Models for Electrostatics
+# GeoShift: Cross-Geometry Pretraining for Equivariant Neural Networks
 
 [![CI](https://github.com/kroy3/geoshift/actions/workflows/ci.yml/badge.svg)](https://github.com/kroy3/geoshift/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![DOI](https://img.shields.io/badge/DOI-10.1063%2F5.0317737-blue.svg)](https://doi.org/10.1063/5.0317737)
 
 Code accompanying the paper
 
-> K. R. Roy, *Cross-Domain Foundation Models for Electrostatics: Pre-training
-> Neural Operators Across Molecular Physics*, APL Computational Physics (2025).
+> K. R. Roy, *Cross-Geometry Pretraining for Equivariant Neural Networks:
+> Improving Molecular Property Prediction Under Computational Constraints*,
+> APL Computational Physics (2026).
+> [doi:10.1063/5.0317737](https://doi.org/10.1063/5.0317737)
 
 GeoShift pre-trains an E(3)-equivariant graph neural network jointly on
 several molecular datasets (QM9, MD17 and ANI-1x) and transfers it to new
@@ -207,11 +210,12 @@ tests/              unit and end-to-end tests
 If you use this code, please cite:
 
 ```bibtex
-@article{roy2025geoshift,
-  title   = {Cross-Domain Foundation Models for Electrostatics: Pre-training Neural Operators Across Molecular Physics},
+@article{roy2026crossgeometry,
+  title   = {Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints},
   author  = {Roy, Kushal Raj},
   journal = {APL Computational Physics},
-  year    = {2025}
+  year    = {2026},
+  doi     = {10.1063/5.0317737}
 }
 ```
 

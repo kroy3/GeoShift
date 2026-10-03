@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "geoshift"
 version = "1.0.0"
-description = "Cross-domain pre-training of equivariant neural networks for molecular electrostatics"
+description = "Cross-geometry pretraining of equivariant neural networks for molecular property prediction"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "Kushal Raj Roy"}]
@@ -35,6 +35,7 @@ geoshift-evaluate = "geoshift.evaluate:main"
 geoshift-download = "geoshift.download:main"
 
 [project.urls]
+Paper = "https://doi.org/10.1063/5.0317737"
 Repository = "https://github.com/kroy3/geoshift"
 Issues = "https://github.com/kroy3/geoshift/issues"
 
