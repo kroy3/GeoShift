@@ -1,11 +1,12 @@
 """Download and pre-process the public datasets.
 
 QM9 and (r)MD17 are fetched automatically through PyTorch Geometric. ANI-1x
-must be downloaded manually because of its size (see README, "Datasets").
+(optional, not used by the paper's configurations) must be downloaded manually
+because of its size (see README, "Datasets").
 
 Examples::
 
-    geoshift-download                                   # everything used by configs/
+    geoshift-download                                   # everything used by configs/ (QM9, MD17, rMD17)
     geoshift-download --datasets qm9 md17:aspirin
 """
 
@@ -15,13 +16,8 @@ import argparse
 
 from geoshift.data import ANI1X_FILENAME, ANI1X_URL, load_source
 
-DEFAULT_DATASETS = [
-    "qm9",
-    "md17:aspirin",
-    "md17:benzene",
-    "md17:ethanol",
-    "md17:malonaldehyde",
-]
+MOLECULES = ["aspirin", "benzene", "ethanol", "malonaldehyde"]
+DEFAULT_DATASETS = ["qm9"] + [f"md17:{m}" for m in MOLECULES] + [f"rmd17:{m}" for m in MOLECULES]
 
 
 def main(argv=None):
@@ -38,7 +34,7 @@ def main(argv=None):
         print(f"  {len(samples)} molecules")
 
     print(
-        f"\nANI-1x: download '{ANI1X_FILENAME}' from\n  {ANI1X_URL}\n"
+        f"\nOptional, ANI-1x: download '{ANI1X_FILENAME}' from\n  {ANI1X_URL}\n"
         f"and place it at {args.data_dir}/ani1x/{ANI1X_FILENAME}"
     )
 

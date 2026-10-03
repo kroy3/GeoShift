@@ -6,8 +6,15 @@ import torch
 from torch_geometric.loader import DataLoader
 
 from geoshift import evaluate as evaluate_cli
-from geoshift.data import HARTREE_TO_EV, Normalizer, build_splits, load_source, split_indices
-from geoshift.train import train
+from geoshift.data import (
+    HARTREE_TO_EV,
+    Normalizer,
+    build_splits,
+    domain_probabilities,
+    load_source,
+    split_indices,
+)
+from geoshift.train import build_scheduler, gradient_balanced_weights, train
 from geoshift.utils import load_config
 
 
@@ -29,7 +36,56 @@ def test_normalizer_round_trip():
     )
 
     restored = Normalizer.from_state_dict(json.loads(json.dumps(norm.state_dict())))
-    torch.testing.assert_close(restored.atom_ref, norm.atom_ref)
+    torch.testing.assert_close(restored.stats["energy"]["atom_ref"], norm.stats["energy"]["atom_ref"])
+    gap = norm.normalize("homo_lumo_gap", batch)
+    torch.testing.assert_close(norm.to_physical("homo_lumo_gap", gap, batch), batch.gap.double())
+
+
+def test_normalizer_skips_missing_labels_and_reads_old_checkpoints():
+    samples = load_source({"name": "synthetic", "n_samples": 32}, "unused")
+    norm = Normalizer.fit(samples)
+    assert "enthalpy" not in norm.stats  # synthetic data has no enthalpy labels
+    old = {"atom_ref": [0.0] * 100, "energy_mean": 1.0, "energy_std": 2.0, "gap_mean": 3.0, "gap_std": 4.0}
+    restored = Normalizer.from_state_dict(old)
+    assert restored.stats["energy"]["std"] == 2.0 and restored.stats["homo_lumo_gap"]["mean"] == 3.0
+
+
+def test_per_dataset_split_caps():
+    cfg = {"datasets": [{"name": "synthetic", "n_samples": 100, "max_train_samples": 7, "max_test_samples": 3}]}
+    splits, record = build_splits(cfg, seed=0)
+    assert len(splits["train"]) == 7 and len(splits["test"]) == 3 and len(splits["val"]) == 10
+    uncapped = split_indices(100, (0.8, 0.1, 0.1), seed=0)
+    assert record["synthetic"]["test"] == uncapped["test"][:3]
+
+
+def test_sampling_temperature():
+    counts = torch.tensor([100.0, 400.0])
+    torch.testing.assert_close(domain_probabilities(counts, 0.0), torch.tensor([0.5, 0.5], dtype=torch.float64))
+    torch.testing.assert_close(domain_probabilities(counts, 1.0), torch.tensor([0.2, 0.8], dtype=torch.float64))
+    torch.testing.assert_close(domain_probabilities(counts, 0.5), torch.tensor([1 / 3, 2 / 3], dtype=torch.float64))
+
+
+def test_gradient_balanced_weights_equalise_gradient_norms():
+    w = torch.nn.Parameter(torch.tensor([1.0, 2.0]))
+    terms = {"a": (w * 10).sum(), "b": (w * 0.1).sum()}
+    weights = gradient_balanced_weights(terms, [w])
+    torch.testing.assert_close(sum(weights.values()), torch.tensor(1.0))
+    norm_a = weights["a"] * 10 * w.numel() ** 0.5
+    norm_b = weights["b"] * 0.1 * w.numel() ** 0.5
+    torch.testing.assert_close(norm_a, norm_b)
+
+
+def test_warmup_cosine_schedule():
+    opt = torch.optim.SGD([torch.nn.Parameter(torch.zeros(1))], lr=1e-3)
+    sched = build_scheduler(opt, {"type": "warmup_cosine", "warmup_epochs": 5, "min_lr": 1e-6}, epochs=100)
+    lrs = []
+    for _ in range(100):
+        lrs.append(opt.param_groups[0]["lr"])
+        opt.step()
+        sched.step()
+    assert lrs[0] == pytest.approx(2e-4) and lrs[4] == pytest.approx(1e-3)
+    assert lrs[5] == pytest.approx(1e-3) and lrs[-1] < 1e-5
+    assert all(a >= b for a, b in zip(lrs[5:], lrs[6:]))
 
 
 def test_ani1x_loader_reads_release_schema(tmp_path):
