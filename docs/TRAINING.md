@@ -38,10 +38,10 @@ model classes. Use the same `hidden_dim`, `vector_dim`, `n_layers` and
   molecules per dataset. The validation and test splits are unaffected, so
   runs with different N are evaluated on the same molecules.
 
-Sample-efficiency curve, pre-trained vs. from scratch:
+Sample-efficiency curve on rMD17 (Fig. 1b of the paper), pretrained vs. from scratch:
 
 ```bash
-for n in 50 100 250 500 1000; do
+for n in 10 20 50 100 200 500 1000; do
   geoshift-train --config configs/transfer.json --max-train-samples $n \
       --output-dir experiments/transfer_pretrained_n$n
   geoshift-train --config configs/transfer.json --max-train-samples $n \
@@ -54,9 +54,20 @@ default; `--pretrained ""` disables this.
 
 ## Mixing datasets
 
-With several datasets, `data.dataset_weights` sets the probability of drawing
-each dataset (with replacement) when building batches, independent of dataset
-size. Without it, all training molecules are shuffled together.
+With several datasets, `data.sampling_temperature` (τ) draws dataset k with
+probability proportional to |D_k|^τ: τ = 0 samples datasets uniformly, τ = 1
+in proportion to their size. The paper uses τ = 0.5. Alternatively,
+`data.dataset_weights` sets the probability of each dataset explicitly. With
+neither, all training molecules are shuffled together.
+
+## Task balancing and gradient accumulation
+
+With `loss.task_weighting: "gradient"`, each task's weight is recomputed every
+step as `(1/|∇L_k|) / Σ_j (1/|∇L_j|)`, which costs one extra backward pass per
+task. The validation loss uses the fixed `loss.weights`, so it stays
+comparable between epochs. `training.gradient_accumulation_steps` sums
+gradients over several batches before each optimiser step; the paper's
+effective batch size of 64 is 16 × 4.
 
 ## Troubleshooting
 

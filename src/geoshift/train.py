@@ -18,6 +18,7 @@ import argparse
 import copy
 import csv
 import json
+import math
 import time
 from pathlib import Path
 from typing import Dict, Mapping
@@ -35,31 +36,59 @@ CRITERIA = {"mae": F.l1_loss, "mse": F.mse_loss}
 
 
 def compute_loss(model, batch, normalizer: Normalizer, loss_cfg: Mapping):
-    """Weighted sum of energy, gap and force losses in normalised units.
+    """Per-task losses in normalised units.
 
-    Gap and force terms only use molecules that have reference values, so
-    datasets with different labels can be mixed in one batch.
+    Every task head of the model contributes a term, as do forces when their
+    weight is positive. Each term only uses molecules that have reference
+    values, so datasets with different labels can be mixed in one batch.
+
+    Returns ``{task: loss tensor}``.
     """
     criterion = CRITERIA[loss_cfg.get("criterion", "mae")]
-    weights = {"energy": 1.0, **loss_cfg.get("weights", {})}
+    weights = loss_cfg.get("weights", {})
     need_forces = weights.get("forces", 0) > 0 and bool(batch.has_force.any())
 
     out = model.predict(batch, compute_forces=need_forces)
-    terms = {"energy": criterion(out["energy"], normalizer.normalize_energy(batch))}
-
-    if "homo_lumo_gap" in out and weights.get("homo_lumo_gap", 0) > 0:
-        mask = ~torch.isnan(batch.gap)
+    terms = {}
+    for task, pred in out.items():
+        if task == "forces" or weights.get(task, 1.0) <= 0 or task not in normalizer.stats:
+            continue
+        target = normalizer.normalize(task, batch)
+        mask = ~torch.isnan(target.view(-1))
         if mask.any():
-            target = normalizer.normalize_gap(batch.gap[mask])
-            terms["homo_lumo_gap"] = criterion(out["homo_lumo_gap"][mask], target)
+            terms[task] = criterion(pred[mask], target[mask])
 
     if need_forces:
         atom_mask = batch.has_force[batch.batch]
         target = normalizer.normalize_force(batch.force[atom_mask])
         terms["forces"] = criterion(out["forces"][atom_mask], target)
+    return terms
 
-    total = sum(weights[name] * value for name, value in terms.items())
-    return total, {name: value.item() for name, value in terms.items()}
+
+def gradient_balanced_weights(terms: Mapping[str, torch.Tensor], params) -> Dict[str, torch.Tensor]:
+    """Task weights inversely proportional to each task's gradient norm.
+
+    ``lambda_k = (1 / |grad L_k|) / sum_j (1 / |grad L_j|)``, so every task
+    contributes a gradient of the same magnitude.
+    """
+    params = [p for p in params if p.requires_grad]
+    inverse = {}
+    for name, loss in terms.items():
+        grads = torch.autograd.grad(loss, params, retain_graph=True, allow_unused=True)
+        norm = torch.sqrt(sum(g.float().pow(2).sum() for g in grads if g is not None))
+        inverse[name] = 1.0 / (norm + 1e-12)
+    total = sum(inverse.values())
+    return {name: (value / total).detach() for name, value in inverse.items()}
+
+
+def combine_terms(model, terms, loss_cfg: Mapping, balance: bool) -> torch.Tensor:
+    """Weighted sum of loss terms: fixed config weights or gradient balancing."""
+    if balance and len(terms) > 1:
+        weights = gradient_balanced_weights(terms, model.parameters())
+    else:
+        cfg_weights = loss_cfg.get("weights", {})
+        weights = {name: cfg_weights.get(name, 1.0) for name in terms}
+    return sum(weights[name] * value for name, value in terms.items())
 
 
 def load_pretrained(model, path, device) -> None:
@@ -93,40 +122,57 @@ def set_backbone_trainable(model, trainable: bool) -> None:
         param.requires_grad_(trainable)
 
 
-def run_epoch(model, loader, normalizer, loss_cfg, device, optimizer=None, scaler=None, clip=None):
-    """One pass over ``loader``; trains when an optimizer is given."""
+def run_epoch(model, loader, normalizer, loss_cfg, device, optimizer=None, scaler=None, clip=None,
+              accumulation_steps: int = 1):
+    """One pass over ``loader``; trains when an optimizer is given.
+
+    During training, gradients are accumulated over ``accumulation_steps``
+    batches before each optimiser step. With ``loss.task_weighting`` set to
+    ``"gradient"``, training uses gradient-balanced task weights; the reported
+    (validation) loss always uses the fixed config weights so it is comparable
+    between epochs.
+    """
     training = optimizer is not None
     model.train(training)
+    balance = training and loss_cfg.get("task_weighting", "fixed") == "gradient"
     totals: Dict[str, float] = {}
     n_batches = 0
-    for batch in loader:
+    if training:
+        optimizer.zero_grad(set_to_none=True)
+    for step, batch in enumerate(loader, start=1):
         batch = batch.to(device)
         # Forces are gradients, so autograd is needed even during validation.
         with torch.set_grad_enabled(True):
             with torch.autocast(device.type, enabled=scaler is not None):
-                loss, terms = compute_loss(model, batch, normalizer, loss_cfg)
+                terms = compute_loss(model, batch, normalizer, loss_cfg)
+            report = combine_terms(model, terms, loss_cfg, balance=False)
             if training:
-                optimizer.zero_grad(set_to_none=True)
+                loss = combine_terms(model, terms, loss_cfg, balance) if balance else report
+                loss = loss / accumulation_steps
                 if scaler is not None:
                     scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
                 else:
                     loss.backward()
-                if clip:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
-                if scaler is not None:
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
-        totals["loss"] = totals.get("loss", 0.0) + loss.item()
+                if step % accumulation_steps == 0 or step == len(loader):
+                    if scaler is not None:
+                        scaler.unscale_(optimizer)
+                    if clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+                    if scaler is not None:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
+        totals["loss"] = totals.get("loss", 0.0) + report.item()
         for name, value in terms.items():
-            totals[f"loss_{name}"] = totals.get(f"loss_{name}", 0.0) + value
+            totals[f"loss_{name}"] = totals.get(f"loss_{name}", 0.0) + value.item()
         n_batches += 1
     return {k: v / max(n_batches, 1) for k, v in totals.items()}
 
 
 def build_scheduler(optimizer, cfg: Mapping, epochs: int):
+    """Learning-rate schedule, stepped once per epoch."""
     kind = cfg.get("type", "reduce_on_plateau")
     if kind == "reduce_on_plateau":
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -137,6 +183,18 @@ def build_scheduler(optimizer, cfg: Mapping, epochs: int):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=epochs, eta_min=cfg.get("min_lr", 1e-6)
         )
+    if kind == "warmup_cosine":
+        warmup = cfg.get("warmup_epochs", 5)
+        base_lr = optimizer.param_groups[0]["lr"]
+        floor = cfg.get("min_lr", 1e-6) / base_lr
+
+        def factor(epoch: int) -> float:
+            if epoch < warmup:
+                return (epoch + 1) / warmup
+            progress = (epoch - warmup) / max(1, epochs - warmup)
+            return floor + (1 - floor) * 0.5 * (1 + math.cos(math.pi * min(progress, 1.0)))
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, factor)
     raise ValueError(f"Unknown scheduler type {kind!r}")
 
 
@@ -160,6 +218,10 @@ def apply_overrides(config: dict, args) -> dict:
         data["num_workers"] = args.num_workers
     if args.max_train_samples is not None:
         data["max_train_samples"] = args.max_train_samples
+        specs = [spec_to_dict(s) for s in data["datasets"]]
+        for spec in specs:
+            spec.pop("max_train_samples", None)  # the command line wins over per-dataset caps
+        data["datasets"] = specs
     if args.max_samples is not None:
         specs = [spec_to_dict(s) for s in data["datasets"]]
         for spec in specs:
@@ -247,7 +309,7 @@ def train(config: dict, device: torch.device, resume=None) -> Path:
     for epoch in range(start_epoch, epochs):
         set_backbone_trainable(model, epoch >= freeze_epochs)
         train_m = run_epoch(model, train_loader, normalizer, loss_cfg, device, optimizer, scaler,
-                            tcfg.get("gradient_clip"))
+                            tcfg.get("gradient_clip"), tcfg.get("gradient_accumulation_steps", 1))
         val_m = run_epoch(model, val_loader, normalizer, loss_cfg, device)
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(val_m["loss"])

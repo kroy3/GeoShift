@@ -1,6 +1,6 @@
 {
-  "experiment_name": "transfer",
-  "output_dir": "experiments/transfer",
+  "experiment_name": "multitask",
+  "output_dir": "experiments/multitask",
   "seed": 42,
   "deterministic": true,
 
@@ -11,7 +11,13 @@
     "cutoff": 5.0,
     "readout": "sum",
     "multitask": true,
-    "task_dims": {"energy": 1}
+    "task_dims": {
+      "energy": 1,
+      "homo_lumo_gap": 1,
+      "enthalpy": 1,
+      "free_energy": 1,
+      "heat_capacity": 1
+    }
   },
 
   "transfer": {
@@ -20,13 +26,7 @@
 
   "data": {
     "data_dir": "data",
-    "datasets": [
-      {"name": "rmd17:aspirin", "max_val_samples": 1000, "max_test_samples": 1000},
-      {"name": "rmd17:benzene", "max_val_samples": 1000, "max_test_samples": 1000},
-      {"name": "rmd17:ethanol", "max_val_samples": 1000, "max_test_samples": 1000},
-      {"name": "rmd17:malonaldehyde", "max_val_samples": 1000, "max_test_samples": 1000}
-    ],
-    "max_train_samples": 50,
+    "datasets": [{"name": "qm9", "max_train_samples": 50000}],
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
@@ -49,8 +49,7 @@
 
   "loss": {
     "criterion": "mae",
-    "task_weighting": "gradient",
-    "weights": {"energy": 1.0, "forces": 1.0}
+    "task_weighting": "gradient"
   },
 
   "logging": {"tensorboard": true}

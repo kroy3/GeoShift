@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Sequence
 import torch
 from torch_geometric.loader import DataLoader
 
-from geoshift.data import Normalizer, build_splits, load_source, spec_label
+from geoshift.data import TASK_ATTRIBUTES, Normalizer, build_splits, load_source, spec_label
 from geoshift.model import build_model
 from geoshift.utils import resolve_device, set_seed
 
@@ -45,12 +45,14 @@ def _batch_needs_forces(batch) -> bool:
 
 
 def predict_physical(model, batch, normalizer: Normalizer, compute_forces: bool):
-    """Model predictions converted to physical units (eV, eV/Angstrom)."""
+    """Model predictions in physical units (eV, eV/Angstrom; Cv in cal/(mol K))."""
     with torch.set_grad_enabled(compute_forces):
         out = model.predict(batch, compute_forces=compute_forces)
-    result = {"energy": normalizer.energy_to_ev(out["energy"].detach(), batch)}
-    if "homo_lumo_gap" in out:
-        result["gap"] = normalizer.gap_to_ev(out["homo_lumo_gap"].detach().double())
+    result = {
+        task: normalizer.to_physical(task, pred.detach(), batch)
+        for task, pred in out.items()
+        if task != "forces" and task in normalizer.stats
+    }
     if compute_forces:
         result["forces"] = normalizer.force_to_ev(out["forces"].detach().double())
     return result
@@ -64,25 +66,28 @@ def evaluate(
     compute_forces: bool = True,
     domain_names: Optional[Sequence[str]] = None,
 ) -> Dict[str, Dict[str, float]]:
-    """Energy, gap and force errors, overall and per source dataset.
+    """Errors for every predicted property and forces, overall and per dataset.
 
-    Returns ``{"overall": {...}, "<dataset>": {...}, ...}``. Energies and gaps
-    are in eV, forces in eV/Angstrom.
+    Returns ``{"overall": {...}, "<dataset>": {...}, ...}`` with keys such as
+    ``energy_mae`` or ``homo_lumo_gap_rmse``. Energies are in eV, forces in
+    eV/Angstrom, heat capacity in cal/(mol K). Molecules without a reference
+    value for a property are skipped for that property.
     """
     model.eval()
     records: Dict[str, List[torch.Tensor]] = defaultdict(list)
+    tasks = set()
     for batch in loader:
         batch = batch.to(device)
         want_forces = compute_forces and _batch_needs_forces(batch)
         pred = predict_physical(model, batch, normalizer, want_forces)
         domain = batch.domain.view(-1).cpu()
         records["domain"].append(domain)
-        records["energy_pred"].append(pred["energy"].cpu())
-        records["energy_true"].append(batch.energy.double().cpu())
-        if "gap" in pred:
-            records["gap_pred"].append(pred["gap"].cpu())
-            records["gap_true"].append(batch.gap.double().cpu())
-            records["gap_domain"].append(domain)
+        for task, value in pred.items():
+            if task == "forces":
+                continue
+            tasks.add(task)
+            records[f"{task}_pred"].append(value.cpu())
+            records[f"{task}_true"].append(getattr(batch, TASK_ATTRIBUTES[task]).double().cpu())
         if want_forces:
             atom_mask = batch.has_force[batch.batch].cpu()
             records["force_pred"].append(pred["forces"].cpu()[atom_mask])
@@ -90,14 +95,14 @@ def evaluate(
             records["force_domain"].append(domain[batch.batch.cpu()][atom_mask])
 
     cat = {k: torch.cat(v) for k, v in records.items()}
+    ordered = [t for t in TASK_ATTRIBUTES if t in tasks]
 
     def summarise(mask_fn) -> Dict[str, float]:
         m = mask_fn(cat["domain"])
         out = {"n_molecules": int(m.sum())}
-        out.update(_regression_metrics(cat["energy_pred"][m], cat["energy_true"][m], "energy"))
-        if "gap_pred" in cat:
-            gm = mask_fn(cat["gap_domain"]) & ~torch.isnan(cat["gap_true"])
-            out.update(_regression_metrics(cat["gap_pred"][gm], cat["gap_true"][gm], "gap"))
+        for task in ordered:
+            tm = m & ~torch.isnan(cat[f"{task}_true"])
+            out.update(_regression_metrics(cat[f"{task}_pred"][tm], cat[f"{task}_true"][tm], task))
         if "force_pred" in cat:
             fm = mask_fn(cat["force_domain"])
             out.update(
@@ -126,7 +131,7 @@ def random_rotation(generator: torch.Generator, dtype=torch.float32) -> torch.Te
 def equivariance_error(model, loader, normalizer: Normalizer, device, n_batches: int = 2, seed: int = 0):
     """Maximum change in predictions under a random rotation and translation.
 
-    Energies (and gaps) should be invariant, and forces should rotate with the
+    Scalar properties should be invariant, and forces should rotate with the
     input. Values are reported in eV and eV/Angstrom and should be at the level
     of floating-point round-off.
     """

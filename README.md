@@ -11,11 +11,12 @@ Code accompanying the paper
 > APL Computational Physics (2026).
 > [doi:10.1063/5.0317737](https://doi.org/10.1063/5.0317737)
 
-GeoShift pre-trains an E(3)-equivariant graph neural network jointly on
-several molecular datasets (QM9, MD17 and ANI-1x) and transfers it to new
-molecular geometries and chemical spaces. This repository contains the model,
-the training and evaluation pipeline, and the configurations used in the
-paper.
+GeoShift pre-trains an E(3)-equivariant graph neural network across molecular
+geometries from QM9 and MD17, trains it jointly on several QM9 properties, and
+fine-tunes it on new molecules with very little data (50 rMD17 conformations
+per molecule). The whole pipeline is designed to run on a single GPU. This
+repository contains the model, the training and evaluation code, and the
+configurations for each stage of the paper.
 
 ## Contents
 
@@ -59,16 +60,18 @@ pytest                                # requires the "dev" extra
 |---|---|---|---|
 | QM9 | ~134k small organic molecules at equilibrium (DFT) | eV | automatic |
 | MD17 / rMD17 | MD trajectories of small molecules with energies and forces | kcal/mol, kcal/mol/Å | automatic |
-| ANI-1x | ~5M off-equilibrium conformations, ωB97x/6-31G(d) energies and forces | Hartree, Hartree/Å | manual |
+| ANI-1x (optional) | ~5M off-equilibrium conformations, ωB97x/6-31G(d) energies and forces | Hartree, Hartree/Å | manual |
 
-All quantities are converted to eV and eV/Å on loading. QM9 and (r)MD17 are
-downloaded through PyTorch Geometric:
+The paper uses QM9, MD17 and rMD17. ANI-1x is supported for further
+experiments but is not part of the paper's configurations. Energies and forces
+are converted to eV and eV/Å on loading. QM9 and (r)MD17 are downloaded through
+PyTorch Geometric:
 
 ```bash
 geoshift-download --data-dir data
 ```
 
-ANI-1x is distributed as a single HDF5 file (`ani1x-release.h5`, ~5 GB).
+To use ANI-1x, download the single HDF5 file (`ani1x-release.h5`, ~5 GB).
 Download it from the
 [figshare release](https://springernature.figshare.com/articles/dataset/ANI-1x_Dataset_Release/10047041)
 and place it at `data/ani1x/ani1x-release.h5`.
@@ -76,34 +79,55 @@ and place it at `data/ani1x/ani1x-release.h5`.
 ## Reproducing the experiments
 
 All experiments are driven by the JSON files in [`configs/`](configs). Each
-run writes its outputs to its own directory (see [Outputs](#outputs)).
+run writes its outputs to its own directory (see [Outputs](#outputs)). The
+configurations follow the paper's protocol:
+
+| Stage | Config | Data |
+|---|---|---|
+| Cross-geometry pretraining | `cross_domain.json` | QM9 (50,000 training molecules) and MD17 aspirin, benzene, ethanol, malonaldehyde (1,000 training / 1,000 test conformations each), sampled with temperature τ = 0.5 |
+| Cross-physics multitask learning | `multitask.json` | QM9: U0, HOMO-LUMO gap, H, G and Cv, with gradient-based task balancing |
+| Single-task baseline | `single_domain.json` | QM9, one property (set `task_dims`) |
+| Few-shot transfer | `transfer.json` | rMD17, 50 training conformations per molecule |
+
+All stages use 5 interaction blocks (128 scalar, 64 vector channels, 5 Å
+cutoff), AdamW (learning rate 10⁻³, weight decay 10⁻⁵, gradient clipping at
+1.0), mixed precision, an effective batch size of 64 (16 × 4 accumulation
+steps), 5 warmup epochs followed by cosine annealing, and early stopping with a
+patience of 10 epochs.
 
 ```bash
-# 1. Cross-domain pre-training (QM9 + MD17 + ANI-1x)
+# 1. Cross-geometry pretraining (QM9 + MD17)
 geoshift-train --config configs/cross_domain.json
 
-# 2. Single-domain baseline (QM9 only)
+# 2. Cross-physics multitask learning on QM9 (initialised from step 1)
+geoshift-train --config configs/multitask.json
+
+# 3. Single-task baseline on QM9 (repeat with each property in task_dims)
 geoshift-train --config configs/single_domain.json
 
-# 3. Transfer to a new domain (fine-tuning on revised MD17 aspirin)
-geoshift-train --config configs/transfer.json \
-    --pretrained experiments/cross_domain/best_model.pt
+# 4. Few-shot transfer to rMD17: pretrained vs. trained from scratch
+geoshift-train --config configs/transfer.json
+geoshift-train --config configs/transfer.json --pretrained "" \
+    --output-dir experiments/transfer_scratch
 
-# 4. Evaluate a checkpoint on a dataset it was not trained on
-geoshift-evaluate --checkpoint experiments/cross_domain/best_model.pt \
-    --dataset rmd17:aspirin --split all
-geoshift-evaluate --checkpoint experiments/single_domain/best_model.pt \
-    --dataset rmd17:aspirin --split all
-
-# 5. Compare the two
+# 5. Compare
 python scripts/analyze_results.py \
-    --model experiments/cross_domain/eval_all_rmd17-aspirin.json \
-    --baseline experiments/single_domain/eval_all_rmd17-aspirin.json
+    --model experiments/transfer/test_metrics.json \
+    --baseline experiments/transfer_scratch/test_metrics.json \
+    --metric force_mae
 ```
+
+For the training-set-size curve, repeat step 4 with
+`--max-train-samples N` for N = 10 … 1000 (see [docs/TRAINING.md](docs/TRAINING.md)).
 
 Useful command-line overrides for `geoshift-train`: `--seed`, `--epochs`,
 `--batch-size`, `--lr`, `--output-dir`, `--data-dir`, `--device`,
-`--max-samples` (cap molecules per dataset for a quick run) and `--resume`.
+`--max-samples` (cap molecules per dataset for a quick run),
+`--max-train-samples`, `--pretrained` and `--resume`.
+
+Splits are random (80/10/10 per dataset, seeded). Caps such as
+`max_train_samples` are applied after splitting, so runs with different
+amounts of training data are evaluated on the same test molecules.
 
 To evaluate transfer to larger molecules, restrict a dataset by atom count,
 for example `{"name": "qm9", "min_atoms": 20}` in a config's `datasets` list.
@@ -124,8 +148,8 @@ records the software versions and git commit it used in `environment.json`.
 | `test_metrics.json` | Test-set metrics of the best checkpoint, overall and per dataset |
 | `tensorboard/` | TensorBoard logs (if enabled and installed) |
 
-Reported metrics are MAE, RMSE and R² for energies (eV), HOMO-LUMO gaps (eV)
-and force components (eV/Å). Each evaluation also reports the largest change in
+Reported metrics are MAE, RMSE and R² for each predicted property (energies
+and gap in eV, Cv in cal/(mol K)) and for force components (eV/Å). Each evaluation also reports the largest change in
 predictions under a random rotation and translation of the input, which checks
 the model's symmetry numerically.
 
@@ -142,19 +166,21 @@ consists of
 2. a **scalar–vector mixing layer** (PaiNN-style): vector-feature norms update
    the scalar features, which in turn gate the vector features.
 
-Atom-wise outputs are pooled to molecule-level predictions. The multitask
-variant shares the encoder across tasks (energy, HOMO-LUMO gap) with one
-output head per task. Forces are computed as the negative gradient of the
+Atom-wise outputs are summed to molecule-level predictions (`readout: "sum"`).
+The multitask variant shares the encoder across tasks with one output head per
+task. Forces are computed as the negative gradient of the
 predicted energy, so they are conservative and rotate correctly with the
 molecule.
 
 The default configuration has 5 blocks, 128 scalar and 64 vector channels, and
 about 0.93M parameters.
 
-Training uses a weighted sum of energy, gap and force losses. Each loss term
-only uses the molecules that have that label, so datasets with different
-labels can be mixed in one batch. Energies are referenced to a per-element
-linear fit on the training set and standardised before training.
+Training minimises a weighted sum of per-task losses. With
+`task_weighting: "gradient"` each task's weight is inversely proportional to
+the norm of its gradient, so no single task dominates. Each loss term only uses
+the molecules that have that label, so datasets with different labels can be
+mixed in one batch. Extensive properties (energies, Cv) are referenced to a
+per-element linear fit on the training set, and all targets are standardised.
 
 ## Configuration
 
@@ -165,19 +191,23 @@ for a complete example):
 |---|---|---|
 | top level | `output_dir`, `seed`, `deterministic` | Output location and reproducibility settings |
 | `model` | `hidden_dim`, `vector_dim`, `n_layers`, `cutoff` | Network size and interaction radius (Å) |
-| | `readout` | `"mean"` or `"sum"` pooling of atom outputs |
-| | `multitask`, `task_dims` | Shared encoder with one head per task |
+| | `readout` | `"sum"` or `"mean"` pooling of atom outputs |
+| | `multitask`, `task_dims` | Shared encoder with one head per task: `energy`, `homo_lumo_gap`, `enthalpy`, `free_energy`, `heat_capacity` |
 | `data` | `datasets` | List of dataset specs (below) |
-| | `dataset_weights` | Sampling probability of each dataset per batch |
+| | `sampling_temperature` | Draw dataset k with probability ∝ \|D_k\|^τ (0 = uniform, 1 = by size) |
+| | `dataset_weights` | Alternative: explicit sampling probability per dataset |
 | | `train_split`, `val_split`, `test_split` | Split fractions, applied per dataset |
-| | `max_train_samples` | Cap on training molecules per dataset (few-shot runs) |
+| | `max_train_samples`, `max_val_samples`, `max_test_samples` | Caps on split sizes, for all datasets or per dataset spec |
 | | `energy_reference` | `"linear_fit"` (per-element reference energies) or `"none"` |
 | `training` | `epochs`, `batch_size`, `learning_rate`, `weight_decay`, `gradient_clip` | Optimisation (AdamW) |
-| | `scheduler` | `{"type": "reduce_on_plateau" \| "cosine", ...}` |
+| | `gradient_accumulation_steps` | Batches per optimiser step |
+| | `scheduler` | `{"type": "warmup_cosine" \| "cosine" \| "reduce_on_plateau", ...}` |
 | | `early_stopping_patience`, `save_frequency` | Stopping and checkpointing |
 | | `freeze_backbone_epochs` | Train only the output heads for the first N epochs |
 | | `use_amp` | Mixed precision (CUDA only) |
-| `loss` | `criterion`, `weights` | `"mae"` or `"mse"`; weights for `energy`, `homo_lumo_gap`, `forces` |
+| `loss` | `criterion` | `"mae"` or `"mse"` |
+| | `task_weighting` | `"fixed"` (use `weights`) or `"gradient"` (gradient-norm balancing) |
+| | `weights` | Per-task weights; `forces` > 0 enables force training; a weight of 0 disables a task |
 | `transfer` | `pretrained_checkpoint` | Initialise from a checkpoint; tensors are matched by name and shape |
 
 Dataset specs are either a name or an object with options:
@@ -186,8 +216,10 @@ Dataset specs are either a name or an object with options:
 "qm9"
 "md17:aspirin"
 "rmd17:aspirin"
-{"name": "ani1x", "max_samples": 50000}
+{"name": "qm9", "max_train_samples": 50000}
+{"name": "md17:aspirin", "max_train_samples": 1000, "max_test_samples": 1000}
 {"name": "qm9", "min_atoms": 20, "max_atoms": 29}
+{"name": "ani1x", "max_samples": 50000}
 ```
 
 ## Repository layout

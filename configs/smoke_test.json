@@ -8,25 +8,30 @@
     "vector_dim": 16,
     "n_layers": 2,
     "cutoff": 5.0,
+    "readout": "sum",
     "multitask": true,
     "task_dims": {"energy": 1, "homo_lumo_gap": 1}
   },
 
   "data": {
     "datasets": [{"name": "synthetic", "n_samples": 200}],
+    "sampling_temperature": 0.5,
     "num_workers": 0
   },
 
   "training": {
     "epochs": 3,
     "batch_size": 16,
+    "gradient_accumulation_steps": 2,
     "learning_rate": 0.001,
     "gradient_clip": 1.0,
+    "scheduler": {"type": "warmup_cosine", "warmup_epochs": 1},
     "save_frequency": 0
   },
 
   "loss": {
     "criterion": "mae",
-    "weights": {"energy": 1.0, "homo_lumo_gap": 0.5, "forces": 0.5}
+    "task_weighting": "gradient",
+    "weights": {"energy": 1.0, "homo_lumo_gap": 1.0, "forces": 1.0}
   }
 }

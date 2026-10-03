@@ -2,17 +2,22 @@
 
 All datasets are converted to a common sample layout (PyG ``Data``):
 
-=============  ============  =====================================================
-attribute      shape         meaning
-=============  ============  =====================================================
-``z``          ``[N]``       atomic numbers
-``pos``        ``[N, 3]``    Cartesian coordinates (Angstrom)
-``energy``     ``[1]``       total energy (eV)
-``gap``        ``[1]``       HOMO-LUMO gap (eV); NaN when not available
-``force``      ``[N, 3]``    forces (eV/Angstrom); zeros when not available
-``has_force``  ``[1]``       whether ``force`` holds reference data
-``domain``     ``[1]``       index of the source dataset in the config
-=============  ============  =====================================================
+=================  ==========  =========================================================
+attribute          shape       meaning
+=================  ==========  =========================================================
+``z``              ``[N]``     atomic numbers
+``pos``            ``[N, 3]``  Cartesian coordinates (Angstrom)
+``energy``         ``[1]``     total energy; for QM9 the internal energy at 0 K, U0 (eV)
+``gap``            ``[1]``     HOMO-LUMO gap (eV)
+``enthalpy``       ``[1]``     enthalpy at 298 K, H (eV)
+``free_energy``    ``[1]``     free energy at 298 K, G (eV)
+``heat_capacity``  ``[1]``     heat capacity at 298 K, Cv (cal/(mol K))
+``force``          ``[N, 3]``  forces (eV/Angstrom); zeros when not available
+``has_force``      ``[1]``     whether ``force`` holds reference data
+``domain``         ``[1]``     index of the source dataset in the config
+=================  ==========  =========================================================
+
+Properties other than ``energy`` are NaN for datasets that do not provide them.
 
 Dataset specifications
 ----------------------
@@ -25,6 +30,10 @@ extra options::
     "ani1x"                   # requires data/ani1x/ani1x-release.h5
     "synthetic"               # small random pair-potential systems (tests only)
     {"name": "qm9", "max_samples": 50000, "min_atoms": 10, "max_atoms": 29}
+
+Per-dataset ``max_train_samples``, ``max_val_samples`` and ``max_test_samples``
+cap the size of each split after the fractional split is made, so the held-out
+molecules do not depend on how much training data is used.
 """
 
 from __future__ import annotations
@@ -40,9 +49,23 @@ from torch_geometric.data import Data
 HARTREE_TO_EV = 27.211386245988
 KCAL_PER_MOL_TO_EV = 0.0433641153087705
 
-# Column indices of torch_geometric.datasets.QM9 targets (already in eV).
+# Column indices of torch_geometric.datasets.QM9 targets (energies already in eV).
 QM9_GAP_INDEX = 4
 QM9_U0_INDEX = 7
+QM9_H_INDEX = 9
+QM9_G_INDEX = 10
+QM9_CV_INDEX = 11
+
+# Prediction task -> sample attribute. Extensive properties are referenced to a
+# per-element linear fit before standardisation; intensive ones are only standardised.
+TASK_ATTRIBUTES = {
+    "energy": "energy",
+    "homo_lumo_gap": "gap",
+    "enthalpy": "enthalpy",
+    "free_energy": "free_energy",
+    "heat_capacity": "heat_capacity",
+}
+EXTENSIVE_TASKS = {"energy", "enthalpy", "free_energy", "heat_capacity"}
 
 MD17_MOLECULES = (
     "aspirin", "benzene", "ethanol", "malonaldehyde",
@@ -63,13 +86,20 @@ def spec_label(spec: DatasetSpec) -> str:
     return spec_to_dict(spec)["name"]
 
 
-def _sample(z, pos, energy, gap=None, force=None) -> Data:
+def _scalar(value) -> torch.Tensor:
+    return torch.tensor([float("nan") if value is None else float(value)])
+
+
+def _sample(z, pos, energy, gap=None, force=None, enthalpy=None, free_energy=None, heat_capacity=None) -> Data:
     n_atoms = z.numel()
     return Data(
         z=z.long(),
         pos=pos.float(),
-        energy=torch.tensor([float(energy)]),
-        gap=torch.tensor([float("nan") if gap is None else float(gap)]),
+        energy=_scalar(energy),
+        gap=_scalar(gap),
+        enthalpy=_scalar(enthalpy),
+        free_energy=_scalar(free_energy),
+        heat_capacity=_scalar(heat_capacity),
         force=torch.zeros(n_atoms, 3) if force is None else force.float(),
         has_force=torch.tensor([force is not None]),
     )
@@ -80,7 +110,11 @@ def _load_qm9(root: Path) -> List[Data]:
 
     dataset = QM9(str(root / "qm9"))
     return [
-        _sample(d.z, d.pos, d.y[0, QM9_U0_INDEX], gap=d.y[0, QM9_GAP_INDEX])
+        _sample(
+            d.z, d.pos, d.y[0, QM9_U0_INDEX], gap=d.y[0, QM9_GAP_INDEX],
+            enthalpy=d.y[0, QM9_H_INDEX], free_energy=d.y[0, QM9_G_INDEX],
+            heat_capacity=d.y[0, QM9_CV_INDEX],
+        )
         for d in dataset
     ]
 
@@ -212,14 +246,16 @@ def build_splits(data_cfg: Mapping, seed: int):
         data_cfg.get("val_split", 0.1),
         data_cfg.get("test_split", 0.1),
     )
-    n_train_max = data_cfg.get("max_train_samples")
     splits = {"train": [], "val": [], "test": []}
     record = {}
     for domain, spec in enumerate(data_cfg["datasets"]):
+        opts = spec_to_dict(spec)
         samples = load_source(spec, data_cfg.get("data_dir", "./data"), seed)
         idx = split_indices(len(samples), fractions, seed)
-        if n_train_max is not None:
-            idx["train"] = idx["train"][:n_train_max]
+        for split in idx:
+            cap = opts.get(f"max_{split}_samples", data_cfg.get(f"max_{split}_samples"))
+            if cap is not None:
+                idx[split] = idx[split][:cap]
         record[spec_label(spec)] = idx
         for split, indices in idx.items():
             for i in indices:
@@ -229,23 +265,42 @@ def build_splits(data_cfg: Mapping, seed: int):
     return splits, record
 
 
-def domain_sampler(train: Sequence[Data], data_cfg: Mapping, seed: int):
-    """Weighted sampler that draws each dataset with the configured probability.
+def domain_probabilities(counts: torch.Tensor, temperature: float) -> torch.Tensor:
+    """Probability of drawing each dataset, ``p_k ~ |D_k|**temperature``.
 
-    Returns ``None`` (plain shuffling) when no dataset weights are configured.
+    ``temperature=0`` samples datasets uniformly, ``temperature=1`` in proportion
+    to their size.
+    """
+    weights = counts.double() ** temperature
+    return weights / weights.sum()
+
+
+def domain_sampler(train: Sequence[Data], data_cfg: Mapping, seed: int):
+    """Sampler that draws each dataset with a configured probability.
+
+    The probability comes from ``sampling_temperature`` (``p_k ~ |D_k|**tau``)
+    or from explicit ``dataset_weights``. Returns ``None`` (plain shuffling)
+    when neither is configured.
     """
     weights_cfg = data_cfg.get("dataset_weights")
-    if not weights_cfg:
+    temperature = data_cfg.get("sampling_temperature")
+    if not weights_cfg and temperature is None:
         return None
+    if weights_cfg and temperature is not None:
+        raise ValueError("Set either dataset_weights or sampling_temperature, not both")
     labels = [spec_label(s) for s in data_cfg["datasets"]]
-    missing = set(labels) - set(weights_cfg)
-    if missing:
-        raise ValueError(f"dataset_weights is missing entries for {sorted(missing)}")
     domains = torch.cat([s.domain for s in train])
-    counts = torch.bincount(domains, minlength=len(labels)).clamp(min=1).float()
-    per_domain = torch.tensor([float(weights_cfg[label]) for label in labels]) / counts
+    counts = torch.bincount(domains, minlength=len(labels)).clamp(min=1).double()
+    if temperature is not None:
+        probabilities = domain_probabilities(counts, float(temperature))
+    else:
+        missing = set(labels) - set(weights_cfg)
+        if missing:
+            raise ValueError(f"dataset_weights is missing entries for {sorted(missing)}")
+        probabilities = torch.tensor([float(weights_cfg[label]) for label in labels], dtype=torch.float64)
+    per_domain = probabilities / counts
     return torch.utils.data.WeightedRandomSampler(
-        per_domain[domains].double(),
+        per_domain[domains],
         num_samples=len(train),
         replacement=True,
         generator=torch.Generator().manual_seed(seed),
@@ -253,83 +308,98 @@ def domain_sampler(train: Sequence[Data], data_cfg: Mapping, seed: int):
 
 
 class Normalizer:
-    """Energy and gap normalisation fitted on the training set.
+    """Per-task target normalisation fitted on the training set.
 
-    Energies are referenced to a per-element linear model (least-squares fit of
-    ``E ~ sum_i e[z_i]``), then standardised. Predictions are made in the
-    normalised space; ``energy_to_ev`` and ``force_to_ev`` map them back.
+    Extensive properties (energies, heat capacity) are first referenced to a
+    per-element linear model (least-squares fit of ``y ~ sum_i r[z_i]``); all
+    properties are then standardised. Models predict in the normalised space and
+    ``to_physical`` maps predictions back. Forces are scaled by the energy
+    standard deviation, so they remain the exact gradient of the energy.
     """
 
-    def __init__(self, atom_ref, energy_mean, energy_std, gap_mean, gap_std):
-        self.atom_ref = torch.as_tensor(atom_ref, dtype=torch.float64)
-        self.energy_mean = float(energy_mean)
-        self.energy_std = float(energy_std)
-        self.gap_mean = float(gap_mean)
-        self.gap_std = float(gap_std)
+    def __init__(self, stats: Mapping[str, Mapping]):
+        self.stats = {}
+        for task, st in stats.items():
+            ref = st.get("atom_ref")
+            self.stats[task] = {
+                "atom_ref": None if ref is None else torch.as_tensor(ref, dtype=torch.float64),
+                "mean": float(st["mean"]),
+                "std": float(st["std"]),
+            }
 
     @classmethod
     def fit(cls, train: Sequence[Data], reference: str = "linear_fit", max_z: int = 100):
-        energies = torch.cat([s.energy for s in train]).double()
-        atom_ref = torch.zeros(max_z, dtype=torch.float64)
-        if reference == "linear_fit":
-            counts = torch.stack(
-                [torch.bincount(s.z, minlength=max_z) for s in train]
-            ).double()
-            present = counts.sum(0) > 0
-            solution = torch.linalg.lstsq(counts[:, present], energies.unsqueeze(1)).solution
-            atom_ref[present] = solution.squeeze(1)
-        elif reference != "none":
+        if reference not in ("linear_fit", "none"):
             raise ValueError(f"energy_reference must be 'linear_fit' or 'none', got {reference!r}")
-        residual = energies - torch.stack([atom_ref[s.z].sum() for s in train])
-        gaps = torch.cat([s.gap for s in train])
-        gaps = gaps[~torch.isnan(gaps)]
-        return cls(
-            atom_ref,
-            residual.mean(),
-            _safe_std(residual),
-            gaps.mean() if gaps.numel() else 0.0,
-            _safe_std(gaps) if gaps.numel() > 1 else 1.0,
-        )
+        counts = torch.stack([torch.bincount(s.z, minlength=max_z) for s in train]).double()
+        stats = {}
+        for task, attr in TASK_ATTRIBUTES.items():
+            values = torch.cat([getattr(s, attr) for s in train]).double()
+            mask = ~torch.isnan(values)
+            if not mask.any():
+                continue
+            atom_ref = None
+            residual = values[mask]
+            if task in EXTENSIVE_TASKS and reference == "linear_fit":
+                atom_ref = torch.zeros(max_z, dtype=torch.float64)
+                present = counts[mask].sum(0) > 0
+                solution = torch.linalg.lstsq(counts[mask][:, present], residual.unsqueeze(1)).solution
+                atom_ref[present] = solution.squeeze(1)
+                residual = residual - counts[mask] @ atom_ref
+            stats[task] = {"atom_ref": atom_ref, "mean": residual.mean(), "std": _safe_std(residual)}
+        return cls(stats)
 
-    def reference_energy(self, batch) -> torch.Tensor:
-        ref = self.atom_ref.to(batch.pos.device)[batch.z]
+    def _reference(self, task: str, batch) -> torch.Tensor:
         n_graphs = batch.energy.size(0)
-        return torch.zeros(n_graphs, dtype=ref.dtype, device=ref.device).index_add_(
-            0, batch.batch, ref
-        )
+        ref = self.stats[task]["atom_ref"]
+        device = batch.pos.device
+        if ref is None:
+            return torch.zeros(n_graphs, dtype=torch.float64, device=device)
+        per_atom = ref.to(device)[batch.z]
+        return torch.zeros(n_graphs, dtype=torch.float64, device=device).index_add_(0, batch.batch, per_atom)
+
+    def normalize(self, task: str, batch) -> torch.Tensor:
+        """Normalised targets ``[B, 1]``; NaN where a molecule has no label."""
+        st = self.stats[task]
+        values = getattr(batch, TASK_ATTRIBUTES[task]).double()
+        residual = values - self._reference(task, batch)
+        return ((residual - st["mean"]) / st["std"]).float().unsqueeze(1)
+
+    def to_physical(self, task: str, pred: torch.Tensor, batch) -> torch.Tensor:
+        """Map normalised predictions ``[B, 1]`` back to physical units ``[B]``."""
+        st = self.stats[task]
+        return pred.view(-1).double() * st["std"] + st["mean"] + self._reference(task, batch)
 
     def normalize_energy(self, batch) -> torch.Tensor:
-        residual = batch.energy.double() - self.reference_energy(batch)
-        return ((residual - self.energy_mean) / self.energy_std).float().unsqueeze(1)
+        return self.normalize("energy", batch)
 
     def energy_to_ev(self, pred: torch.Tensor, batch) -> torch.Tensor:
-        residual = pred.view(-1).double() * self.energy_std + self.energy_mean
-        return residual + self.reference_energy(batch)
+        return self.to_physical("energy", pred, batch)
 
     def normalize_force(self, force: torch.Tensor) -> torch.Tensor:
-        return force / self.energy_std
+        return force / self.stats["energy"]["std"]
 
     def force_to_ev(self, pred: torch.Tensor) -> torch.Tensor:
-        return pred * self.energy_std
-
-    def normalize_gap(self, gap: torch.Tensor) -> torch.Tensor:
-        return ((gap - self.gap_mean) / self.gap_std).unsqueeze(1)
-
-    def gap_to_ev(self, pred: torch.Tensor) -> torch.Tensor:
-        return pred.view(-1) * self.gap_std + self.gap_mean
+        return pred * self.stats["energy"]["std"]
 
     def state_dict(self) -> dict:
         return {
-            "atom_ref": self.atom_ref.tolist(),
-            "energy_mean": self.energy_mean,
-            "energy_std": self.energy_std,
-            "gap_mean": self.gap_mean,
-            "gap_std": self.gap_std,
+            task: {
+                "atom_ref": None if st["atom_ref"] is None else st["atom_ref"].tolist(),
+                "mean": st["mean"],
+                "std": st["std"],
+            }
+            for task, st in self.stats.items()
         }
 
     @classmethod
     def from_state_dict(cls, state: Mapping) -> "Normalizer":
-        return cls(**state)
+        if "energy_mean" in state:  # checkpoints written before per-task normalisation
+            state = {
+                "energy": {"atom_ref": state["atom_ref"], "mean": state["energy_mean"], "std": state["energy_std"]},
+                "homo_lumo_gap": {"atom_ref": None, "mean": state["gap_mean"], "std": state["gap_std"]},
+            }
+        return cls(state)
 
 
 def _safe_std(x: torch.Tensor) -> float:
