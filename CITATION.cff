@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the article below."
-title: "GeoShift: Cross-Geometry Pretraining for Equivariant Neural Networks"
+title: "Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints"
 version: 1.0.0
 license: MIT
 repository-code: "https://github.com/kroy3/geoshift"

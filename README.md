@@ -1,4 +1,4 @@
-# GeoShift: Cross-Geometry Pretraining for Equivariant Neural Networks
+# Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints
 
 [![CI](https://github.com/kroy3/geoshift/actions/workflows/ci.yml/badge.svg)](https://github.com/kroy3/geoshift/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -11,7 +11,10 @@ Code accompanying the paper
 > APL Computational Physics (2026).
 > [doi:10.1063/5.0317737](https://doi.org/10.1063/5.0317737)
 
-GeoShift pre-trains an E(3)-equivariant graph neural network across molecular
+The code is distributed as the Python package **`geoshift`** (commands
+`geoshift-train`, `geoshift-evaluate` and `geoshift-download`).
+
+It pre-trains an E(3)-equivariant graph neural network across molecular
 geometries from QM9 and MD17, trains it jointly on several QM9 properties, and
 fine-tunes it on new molecules with very little data (50 rMD17 conformations
 per molecule). The whole pipeline is designed to run on a single GPU. This
