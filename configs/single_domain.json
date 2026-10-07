@@ -1,6 +1,6 @@
 {
-  "experiment_name": "single_domain",
-  "output_dir": "experiments/single_domain",
+  "experiment_name": "single_task",
+  "output_dir": "experiments/single_task",
   "seed": 42,
   "deterministic": true,
 
@@ -9,13 +9,14 @@
     "vector_dim": 64,
     "n_layers": 5,
     "cutoff": 5.0,
-    "readout": "mean",
-    "multitask": false
+    "readout": "sum",
+    "multitask": true,
+    "task_dims": {"energy": 1}
   },
 
   "data": {
     "data_dir": "data",
-    "datasets": [{"name": "qm9", "max_samples": 50000}],
+    "datasets": [{"name": "qm9", "max_train_samples": 50000}],
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
@@ -25,19 +26,19 @@
 
   "training": {
     "epochs": 100,
-    "batch_size": 32,
+    "batch_size": 16,
+    "gradient_accumulation_steps": 4,
     "learning_rate": 0.001,
     "weight_decay": 1e-5,
     "gradient_clip": 1.0,
-    "scheduler": {"type": "reduce_on_plateau", "factor": 0.5, "patience": 10, "min_lr": 1e-6},
-    "early_stopping_patience": 20,
-    "use_amp": false,
+    "scheduler": {"type": "warmup_cosine", "warmup_epochs": 5, "min_lr": 1e-6},
+    "early_stopping_patience": 10,
+    "use_amp": true,
     "save_frequency": 10
   },
 
   "loss": {
-    "criterion": "mae",
-    "weights": {"energy": 1.0}
+    "criterion": "mae"
   },
 
   "logging": {"tensorboard": true}
