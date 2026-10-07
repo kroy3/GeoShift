@@ -6,10 +6,10 @@
 
 Code accompanying the paper
 
-> K. R. Roy, *Cross-Geometry Pretraining for Equivariant Neural Networks:
-> Improving Molecular Property Prediction Under Computational Constraints*,
-> APL Computational Physics (2026).
-> [doi:10.1063/5.0317737](https://doi.org/10.1063/5.0317737)
+> Kushal Raj Roy; Cross-geometry pretraining for equivariant neural networks:
+> Improving molecular property prediction under computational constraints.
+> *AIP Advances* 1 October 2026; 16 (10): 105006.
+> [https://doi.org/10.1063/5.0317737](https://doi.org/10.1063/5.0317737)
 
 The code is distributed as the Python package **`geoshift`** (commands
 `geoshift-train`, `geoshift-evaluate` and `geoshift-download`).
@@ -244,12 +244,21 @@ tests/              unit and end-to-end tests
 
 If you use this code, please cite:
 
+> Kushal Raj Roy; Cross-geometry pretraining for equivariant neural networks:
+> Improving molecular property prediction under computational constraints.
+> *AIP Advances* 1 October 2026; 16 (10): 105006.
+> https://doi.org/10.1063/5.0317737
+
 ```bibtex
 @article{roy2026crossgeometry,
-  title   = {Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints},
+  title   = {Cross-geometry pretraining for equivariant neural networks: Improving molecular property prediction under computational constraints},
   author  = {Roy, Kushal Raj},
-  journal = {APL Computational Physics},
+  journal = {AIP Advances},
+  volume  = {16},
+  number  = {10},
+  pages   = {105006},
   year    = {2026},
+  month   = oct,
   doi     = {10.1063/5.0317737}
 }
 ```
