@@ -10,12 +10,17 @@ authors:
     affiliation: "Department of Biochemistry, University of Houston"
 preferred-citation:
   type: article
-  title: "Cross-Geometry Pretraining for Equivariant Neural Networks: Improving Molecular Property Prediction Under Computational Constraints"
+  title: "Cross-geometry pretraining for equivariant neural networks: Improving molecular property prediction under computational constraints"
   authors:
     - family-names: Roy
       given-names: Kushal Raj
       affiliation: "Department of Biochemistry, University of Houston"
-  journal: "APL Computational Physics"
+  journal: "AIP Advances"
+  volume: 16
+  issue: 10
+  start: "105006"
   year: 2026
+  month: 10
+  date-published: 2026-10-01
   doi: "10.1063/5.0317737"
   url: "https://doi.org/10.1063/5.0317737"
